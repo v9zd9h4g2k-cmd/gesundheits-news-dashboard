@@ -17,7 +17,25 @@ Lokales Web-Dashboard, das Meldungen deutscher Medien mit Bezug zur **Gesundheit
 - **Automatische Aktualisierung** alle 15 Minuten; Meldungen werden 8 Tage lokal vorgehalten, damit auch die 7-Tage-Sicht vollständig ist.
 - **Keine Abhängigkeiten:** reines Node.js, kein `npm install` nötig. Heller und dunkler Modus, mobil nutzbar.
 
-## Schnellstart
+## Nutzung ohne eigenen Server (GitHub Pages) – empfohlen
+
+Du brauchst nichts zu installieren: GitHub ruft die Feeds alle 30 Minuten automatisch ab und veröffentlicht das Dashboard als Webseite.
+
+1. Im Repository **Settings → Pages** öffnen und unter *Build and deployment → Source* **GitHub Actions** auswählen.
+2. Unter **Actions** den Workflow *Dashboard aktualisieren* öffnen und **Run workflow** klicken (danach läuft er alle 30 Minuten von selbst).
+3. Nach 1–2 Minuten ist das Dashboard erreichbar unter
+   **https://v9zd9h4g2k-cmd.github.io/gesundheits-news-dashboard/**
+
+Die Quellenauswahl im Dialog wird in deinem Browser gespeichert.
+
+**KI-Zusammenfassungen (optional):** unter **Settings → Secrets and variables → Actions → New repository secret** einen Key als `ANTHROPIC_API_KEY` (oder `OPENAI_API_KEY`) anlegen. Ab dem nächsten Lauf gibt es KI-Zusammenfassungen, GKV-Einschätzungen und das Lagebild. Ein anderes Modell lässt sich als Variable `LLM_MODEL` (Reiter *Variables*) festlegen. Pro Lauf werden höchstens 60 neue Zusammenfassungen erzeugt; bereits erstellte werden wiederverwendet.
+
+Hinweise:
+- Die Seite ist öffentlich erreichbar (wie das Repository). Sie enthält nur Titel, Teaser und Links öffentlicher Feeds; der API-Key bleibt als Secret verborgen.
+- GitHub pausiert zeitgesteuerte Workflows, wenn im Repository 60 Tage lang nichts passiert. Dann unter *Actions* einmal auf *Enable workflow* klicken.
+- Zeitgesteuerte Läufe können sich bei hoher Auslastung von GitHub um einige Minuten verzögern.
+
+## Lokaler Betrieb (optional)
 
 Voraussetzung: [Node.js](https://nodejs.org) ab Version 18 (empfohlen 20 oder 22).
 
@@ -90,6 +108,11 @@ RSS/Atom-Feeds + Google-News-Suche  →  Speicher (8 Tage, data/articles.json)
 - **Duplikate:** Dieselbe Meldung aus RSS und Google News wird zusammengeführt; Tracking-Parameter werden aus Links entfernt.
 
 ## Projektstruktur
+
+```
+.github/workflows/pages.yml  automatischer Abruf und Veröffentlichung auf GitHub Pages
+scripts/build-static.js      erzeugt die statische Seite (npm run build)
+```
 
 ```
 server.js            HTTP-Server und API

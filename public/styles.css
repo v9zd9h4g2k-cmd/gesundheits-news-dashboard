@@ -312,3 +312,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
   .meta-row { flex-wrap: wrap; }
 }
 .dialog-head > .btn { align-self: flex-start; }
+body.static #s-google-row, body.static .add-source { display: none; }
+.static-note { display: none; font-size: 13px; color: var(--muted); margin: 0; }
+body.static .static-note { display: block; }

@@ -33,7 +33,7 @@
   </header>
 
   <div class="demo-banner" id="demo-banner" hidden>
-    Demo-Modus: Die angezeigten Meldungen sind ausgedachte Beispieldaten. Für echte Nachrichten mit <code>npm start</code> starten.
+    Demo-Modus: Die angezeigten Meldungen sind ausgedachte Beispieldaten.
   </div>
 
   <nav class="toolbar" aria-label="Filter">
@@ -109,13 +109,14 @@
         <button class="btn ghost icon" value="cancel" aria-label="Schließen">✕</button>
       </header>
       <div class="dialog-body">
-        <label class="switch-row">
+        <label class="switch-row" id="s-google-row">
           <input type="checkbox" id="s-google">
           <span>
             <strong>Google-News-Ergänzung</strong>
             <small>Sucht zusätzlich gezielt nach Gesundheits- und GKV-Artikeln der gewählten Medien (auch für Medien ohne eigenen RSS-Feed).</small>
           </span>
         </label>
+        <p class="static-note">Die Auswahl wird in diesem Browser gespeichert. Weitere Medien lassen sich in <code>src/sources.js</code> im GitHub-Repository ergänzen.</p>
         <div class="source-bulk">
           <button type="button" class="btn small" data-bulk="all">Alle</button>
           <button type="button" class="btn small" data-bulk="none">Keine</button>

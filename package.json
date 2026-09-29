@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "demo": "node server.js --demo",
+    "build": "node scripts/build-static.js",
     "check-feeds": "node scripts/check-feeds.js",
     "test": "node --test"
   }

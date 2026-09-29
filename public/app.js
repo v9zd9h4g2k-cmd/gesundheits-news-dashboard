@@ -26,7 +26,74 @@ const state = {
   llmActive: false,
   aiRequested: new Set(),
   sources: null,
+  static: false, // GitHub-Pages-Modus: Daten kommen als JSON-Dateien
+  site: null,
+  selected: null, // Quellenauswahl im statischen Modus (localStorage)
 };
+
+const SEL_KEY = 'gnd.selectedSources';
+function loadSelection(sources) {
+  try {
+    const raw = localStorage.getItem(SEL_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch { /* privater Modus o. Ä. */ }
+  return new Set(sources.filter((x) => x.default).map((x) => x.id));
+}
+function saveSelection(set) {
+  try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch { /* egal */ }
+}
+
+async function getJson(path) {
+  const res = await fetch(`${path}${path.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Datei ${path} nicht gefunden (${res.status})`);
+  return res.json();
+}
+
+/** Statischer Modus: Themen auf die gewählten Quellen einschränken und neu zählen. */
+function applySelection(data) {
+  const sel = state.selected;
+  const hours = data.hours;
+  const buckets = hours <= 24 ? 24 : hours <= 72 ? 18 : 14;
+  const now = Date.now();
+  const span = (hours * 3600e3) / buckets;
+  const start = now - hours * 3600e3;
+  const clusters = [];
+  for (const c0 of data.clusters) {
+    const articles = c0.articles.filter((a) => sel.has(a.sourceId));
+    if (!articles.length) continue;
+    const c = { ...c0, articles };
+    const counts = new Map();
+    for (const a of articles) {
+      const e = counts.get(a.sourceId) || { id: a.sourceId, name: a.sourceName, count: 0 };
+      e.count++;
+      counts.set(a.sourceId, e);
+    }
+    c.sources = [...counts.values()].sort((a, b) => b.count - a.count);
+    c.sourceCount = c.sources.length;
+    c.articleCount = articles.length;
+    const dates = articles.map((a) => a.date).filter(Boolean).sort();
+    c.firstSeen = dates[0];
+    c.lastSeen = dates[dates.length - 1];
+    c.presence = c.sourceCount * 3 + c.articleCount + (c.gkv ? 2 : 0);
+    const tl = new Array(buckets).fill(0);
+    for (const a of articles) {
+      const i = Math.floor((new Date(a.date).getTime() - start) / span);
+      if (i >= 0 && i < buckets) tl[i]++;
+      else if (i >= buckets) tl[buckets - 1]++;
+    }
+    c.timeline = tl;
+    clusters.push(c);
+  }
+  clusters.sort((a, b) => b.presence - a.presence || (b.lastSeen || '').localeCompare(a.lastSeen || ''));
+  const topics = {};
+  for (const c of clusters) for (const t of c.topics) topics[t] = (topics[t] || 0) + c.articleCount;
+  return {
+    ...data,
+    clusters,
+    lastRefresh: data.builtAt || data.lastRefresh,
+    stats: { ...data.stats, selectedSources: sel.size, topics },
+  };
+}
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -82,7 +149,9 @@ async function load({ quiet = false } = {}) {
     $('#clusters').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
   }
   try {
-    const data = await api(`/api/news?hours=${state.hours}`);
+    const data = state.static
+      ? applySelection(await getJson(`data/news-${state.hours}.json`))
+      : await api(`api/news?hours=${state.hours}`);
     state.data = data;
     if (!quiet) state.shown = PAGE;
     $('#demo-banner').hidden = !data.demo;
@@ -119,7 +188,7 @@ function render() {
   const list = filtered();
 
   $('#stand').textContent = d.lastRefresh
-    ? `Stand: ${whenLabel(d.lastRefresh)} · ${d.stats.selectedSources} Quellen ausgewählt`
+    ? `Stand: ${whenLabel(d.lastRefresh)}${state.static ? ' (automatisch alle 30 Min.)' : ''} · ${d.stats.selectedSources} Quellen ausgewählt`
     : 'Noch kein Abruf – Feeds werden geladen …';
   $('#source-count').textContent = d.stats.selectedSources;
 
@@ -275,7 +344,7 @@ function requestAiSummaries(clusters) {
     const batch = todo.slice(i, i + 6);
     aiQueue = aiQueue.then(async () => {
       try {
-        const r = await api('/api/summaries', { method: 'POST', body: { hours: state.hours, ids: batch.map((c) => c.id) } });
+        const r = await api('api/summaries', { method: 'POST', body: { hours: state.hours, ids: batch.map((c) => c.id) } });
         for (const c of batch) {
           if (r.results?.[c.id]) c.ai = r.results[c.id];
           else c.aiFailed = true;
@@ -297,17 +366,30 @@ function requestAiSummaries(clusters) {
 }
 
 // ---- Lagebild -------------------------------------------------------------------------
+function showBriefing(b) {
+  const box = $('#briefing');
+  box.classList.remove('muted');
+  box.innerHTML = `<p>${esc(b.intro)}</p><ul>${b.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
+    ${b.watch.length ? `<div class="watch"><b>Im Blick behalten:</b> ${b.watch.map(esc).join(' · ')}</div>` : ''}`;
+}
+
 async function createBriefing() {
   const box = $('#briefing');
   const btn = $('#btn-briefing');
+  if (state.static) {
+    if (state.data?.briefing) showBriefing(state.data.briefing);
+    else {
+      box.classList.add('muted');
+      box.textContent = 'Das Lagebild wird erstellt, sobald im GitHub-Repository ein API-Key als Secret hinterlegt ist (siehe README).';
+    }
+    return;
+  }
   btn.disabled = true;
   box.classList.add('muted');
   box.textContent = 'Lagebild wird erstellt …';
   try {
-    const b = await api('/api/briefing', { method: 'POST', body: { hours: state.hours, gkv: state.gkv } });
-    box.classList.remove('muted');
-    box.innerHTML = `<p>${esc(b.intro)}</p><ul>${b.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
-      ${b.watch.length ? `<div class="watch"><b>Im Blick behalten:</b> ${b.watch.map(esc).join(' · ')}</div>` : ''}`;
+    const b = await api('api/briefing', { method: 'POST', body: { hours: state.hours, gkv: state.gkv } });
+    showBriefing(b);
     btn.textContent = 'Neu erstellen';
   } catch (e) {
     box.textContent = e.message;
@@ -358,7 +440,14 @@ function updateSelCount() {
 }
 
 async function openSources() {
-  state.sources = await api('/api/sources');
+  if (state.static) {
+    const s = await getJson('data/sources.json');
+    state.sources = { ...s, googleNews: true, sources: s.sources.map((x) => ({ ...x, selected: state.selected.has(x.id) })) };
+    renderSourceDialog();
+    $('#dlg-sources').showModal();
+    return;
+  }
+  state.sources = await api('api/sources');
   state.defaultIds = null;
   renderSourceDialog();
   $('#dlg-sources').showModal();
@@ -379,7 +468,7 @@ function wireSourceDialog() {
     }
     if (del) {
       e.preventDefault();
-      state.sources = await api(`/api/sources/custom/${del}`, { method: 'DELETE' });
+      state.sources = await api(`api/sources/custom/${del}`, { method: 'DELETE' });
       renderSourceDialog();
     }
   });
@@ -393,7 +482,7 @@ function wireSourceDialog() {
   $('#c-add').addEventListener('click', async () => {
     $('#c-error').textContent = '';
     try {
-      state.sources = await api('/api/sources/custom', {
+      state.sources = await api('api/sources/custom', {
         method: 'POST',
         body: { name: $('#c-name').value, url: $('#c-url').value, domain: $('#c-domain').value, health: $('#c-health').checked },
       });
@@ -407,7 +496,14 @@ function wireSourceDialog() {
   $('#dlg-sources').addEventListener('close', async () => {
     if ($('#dlg-sources').returnValue !== 'save') return;
     const selected = $$('#source-groups input:checked').map((i) => i.value);
-    await api('/api/sources', { method: 'PUT', body: { selectedSources: selected, googleNews: $('#s-google').checked } });
+    if (state.static) {
+      state.selected = new Set(selected);
+      saveSelection(state.selected);
+      toast('Quellenauswahl gespeichert (in diesem Browser)');
+      await load({ quiet: true });
+      return;
+    }
+    await api('api/sources', { method: 'PUT', body: { selectedSources: selected, googleNews: $('#s-google').checked } });
     toast('Quellen gespeichert – Feeds werden abgerufen …');
     await load({ quiet: true });
     setTimeout(() => load({ quiet: true }), 8000);
@@ -430,7 +526,7 @@ function updateSettingsForm() {
 }
 
 async function openSettings() {
-  const s = await api('/api/settings');
+  const s = await api('api/settings');
   $('#l-provider').value = s.llm.provider;
   $('#l-model').value = s.llm.model || '';
   $('#l-key').value = '';
@@ -451,7 +547,7 @@ function wireSettings() {
     if ($('#dlg-settings').returnValue !== 'save') return;
     const llm = { provider: $('#l-provider').value, model: $('#l-model').value, ollamaUrl: $('#l-ollama').value };
     if ($('#l-key').value.trim()) llm.apiKey = $('#l-key').value.trim();
-    const s = await api('/api/settings', { method: 'PUT', body: { llm, clusterThreshold: Number($('#c-threshold').value) } });
+    const s = await api('api/settings', { method: 'PUT', body: { llm, clusterThreshold: Number($('#c-threshold').value) } });
     state.llmActive = s.llm.active !== 'none';
     state.aiRequested.clear();
     state.aiErrorShown = false;
@@ -498,7 +594,7 @@ function wire() {
     b.disabled = true;
     b.classList.add('spinning');
     try {
-      await api('/api/refresh', { method: 'POST' });
+      if (!state.static) await api('api/refresh', { method: 'POST' });
       await load({ quiet: true });
       toast('Aktualisiert');
     } catch (e) {
@@ -518,7 +614,23 @@ function wire() {
 async function init() {
   wire();
   try {
-    const s = await api('/api/settings');
+    state.site = await getJson('data/site.json');
+    state.static = !!state.site.static;
+  } catch { /* lokaler Server-Modus */ }
+  if (state.static) {
+    document.body.classList.add('static');
+    const src = await getJson('data/sources.json');
+    state.selected = loadSelection(src.sources);
+    $('#btn-settings').hidden = true;
+    $('#btn-refresh .lbl').textContent = 'Neu laden';
+    $('#btn-refresh').title = 'Neuesten Datenstand laden';
+    $('#btn-briefing').textContent = 'Anzeigen';
+    await load();
+    setInterval(() => load({ quiet: true }), 10 * 60e3);
+    return;
+  }
+  try {
+    const s = await api('api/settings');
     state.llmActive = s.llm.active !== 'none';
     if (!state.llmActive) $('#btn-briefing').title = 'Benötigt einen KI-Anbieter (Einstellungen)';
   } catch { /* egal */ }
