@@ -14,7 +14,7 @@ jener jenes jetzt kann kein keine keinem keinen keiner keines können könnte ma
 muss musste nach nicht nichts noch nun nur ob oder ohne sehr sein seine seinem seinen seiner seines selbst sich sie sind so solche soll sollen sollte
 sondern sonst über um und uns unser unsere unter viel vom von vor wann war waren warum was weil welche welchem welchen welcher welches wenn wer werde
 werden wie wieder will wir wird wirst wo wollen wollte würde würden zu zum zur zwar zwischen neue neuen neuer neues mehr weniger heute gestern morgen
-jahr jahre jahren prozent millionen milliarden euro laut sagt sagte sagen erklärt erklärte berichtet wegen sowie bereits rund etwa derzeit künftig
+jahr jahre jahren legt legen plant planen fordert fordern rechnet rechnen empfiehlt berät beraten bleibt bleiben steigen steigt weiter sieht sehen geplant geplante soll sollen kommt kommen will wollen warnt warnen droht drohen könnte prozent millionen milliarden euro laut sagt sagte sagen erklärt erklärte berichtet wegen sowie bereits rund etwa derzeit künftig
 seit schon immer einem ersten zwei drei vier fünf zehn woche wochen tag tage tagen uhr neu ab kommenden nächste nächsten soll sei seien
 mehrere weitere weiteren dpa afp epd kna reuters mehr lesen hier artikel foto bild video podcast live ticker liveblog newsblog update
 `.trim().split(/\s+/));
@@ -36,6 +36,13 @@ function stem(word) {
   return w;
 }
 
+// Wortbestandteile, die in Komposita stecken (Krankenkassenbeiträge → kasse, beitrag)
+const SUBWORDS = [
+  'beitrag', 'kasse', 'versicher', 'klinik', 'krankenhaus', 'apothek', 'pflege', 'arzt', 'ärzt', 'reform',
+  'finanz', 'defizit', 'patient', 'praxis', 'praxen', 'impf', 'arznei', 'medikament', 'lieferengp', 'digital',
+  'krankenstand', 'krankschreib', 'krankmeld', 'eigenanteil', 'honorar', 'notfall', 'rettung', 'hausarzt', 'fonds',
+];
+
 /** Zerlegt Text in Stämme; merkt sich die häufigste Oberflächenform. */
 function tokenize(text, surface) {
   const words = (text || '').toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}-]*[\p{L}\p{N}]|[\p{L}]{2,}/gu) || [];
@@ -45,6 +52,11 @@ function tokenize(text, surface) {
     if (w.length < 3 || STOPWORDS.has(w) || /^\d+$/.test(w)) continue;
     const s = stem(w);
     out.push(s);
+    if (w.length >= 9) {
+      for (const sw of SUBWORDS) {
+        if (w.includes(sw) && !w.startsWith(sw + (w.length > sw.length + 3 ? '' : '#'))) out.push(`~${normalize(sw)}`);
+      }
+    }
     if (surface) {
       const m = surface.get(s) || new Map();
       m.set(raw, (m.get(raw) || 0) + 1);
@@ -86,7 +98,7 @@ function centroidOf(members) {
  * @param {Array} articles  – {id,title,description,sourceId,sourceName,date,...}
  * @param {{threshold?:number}} opts
  */
-function clusterArticles(articles, { threshold = 0.3 } = {}) {
+function clusterArticles(articles, { threshold = 0.25 } = {}) {
   const surface = new Map();
   const docs = articles.map((a) => {
     const titleTokens = tokenize(a.title, surface);
@@ -117,43 +129,37 @@ function clusterArticles(articles, { threshold = 0.3 } = {}) {
     d.titleVec = norm(new Map(d.titleTokens.map((t) => [t, idf(t)])));
   }
 
-  // Greedy-Zuordnung (neueste zuerst)
-  docs.sort((x, y) => (y.a.date || '').localeCompare(x.a.date || ''));
-  const clusters = [];
-  for (const d of docs) {
-    let best = null;
-    let bestSim = 0;
-    for (const c of clusters) {
-      let sim = cosine(d.vec, c.centroid);
-      // starke Titel-Übereinstimmung mit einem Mitglied zählt ebenfalls
-      for (const m of c.members) {
-        const ts = cosine(d.titleVec, m.titleVec);
-        if (ts > sim) sim = Math.max(sim, ts * 0.9);
-      }
-      if (sim > bestSim) { bestSim = sim; best = c; }
-    }
-    if (best && bestSim >= threshold) {
-      best.members.push(d);
-      best.centroid = centroidOf(best.members);
-    } else {
-      clusters.push({ members: [d], centroid: d.vec });
-    }
+  // Paarweise Ähnlichkeit über invertierten Index (nur Paare mit gemeinsamen Wörtern)
+  const n = docs.length;
+  const pairSims = sparseSimilarities(docs.map((d) => d.vec));
+  const titleSims = sparseSimilarities(docs.map((d) => d.titleVec));
+  const sims = new Map(); // "i,j" (i<j) -> Ähnlichkeit
+  for (const [k, v] of pairSims) sims.set(k, v);
+  for (const [k, v] of titleSims) sims.set(k, Math.max(sims.get(k) || 0, 0.9 * v));
+
+  // Vorgruppierung: Zusammenhangskomponenten über ausreichend ähnliche Paare
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x) => (parent[x] === x ? x : (parent[x] = find(parent[x])));
+  const edgeMin = threshold * 0.6;
+  for (const [k, v] of sims) {
+    if (v < edgeMin) continue;
+    const [i, j] = k.split(',').map(Number);
+    parent[find(i)] = find(j);
+  }
+  const components = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!components.has(r)) components.set(r, []);
+    components.get(r).push(i);
   }
 
-  // Zusammenführen sehr ähnlicher Cluster
-  let merged = true;
-  while (merged) {
-    merged = false;
-    outer: for (let i = 0; i < clusters.length; i++) {
-      for (let j = i + 1; j < clusters.length; j++) {
-        if (cosine(clusters[i].centroid, clusters[j].centroid) >= threshold + 0.08) {
-          clusters[i].members.push(...clusters[j].members);
-          clusters[i].centroid = centroidOf(clusters[i].members);
-          clusters.splice(j, 1);
-          merged = true;
-          break outer;
-        }
-      }
+  // Innerhalb jeder Komponente: agglomeratives Clustering mit Average-Linkage.
+  // Das verhindert, dass einzelne allgemeine Wörter ganze Themen verketten.
+  const clusters = [];
+  for (const idx of components.values()) {
+    for (const g of averageLinkage(idx, sims, threshold)) {
+      const members = g.map((i) => docs[i]);
+      clusters.push({ members, centroid: centroidOf(members) });
     }
   }
 
@@ -164,6 +170,70 @@ function clusterArticles(articles, { threshold = 0.3 } = {}) {
   };
 
   return clusters.map((c) => buildCluster(c, surfaceOf));
+}
+
+function sparseSimilarities(vecs) {
+  const index = new Map();
+  vecs.forEach((v, i) => {
+    for (const [t, w] of v) {
+      if (!index.has(t)) index.set(t, []);
+      index.get(t).push([i, w]);
+    }
+  });
+  const out = new Map();
+  for (const postings of index.values()) {
+    if (postings.length > 400) continue; // extrem häufige Wörter tragen nichts bei
+    for (let a = 0; a < postings.length; a++) {
+      const [i, wi] = postings[a];
+      for (let b = a + 1; b < postings.length; b++) {
+        const [j, wj] = postings[b];
+        const k = i < j ? `${i},${j}` : `${j},${i}`;
+        out.set(k, (out.get(k) || 0) + wi * wj);
+      }
+    }
+  }
+  return out;
+}
+
+function averageLinkage(idx, sims, threshold) {
+  const m = idx.length;
+  if (m === 1) return [idx];
+  const S = Array.from({ length: m }, () => new Float64Array(m));
+  for (let a = 0; a < m; a++) {
+    for (let b = a + 1; b < m; b++) {
+      const i = idx[a];
+      const j = idx[b];
+      const v = sims.get(i < j ? `${i},${j}` : `${j},${i}`) || 0;
+      S[a][b] = v;
+      S[b][a] = v;
+    }
+  }
+  const groups = idx.map((i) => [i]);
+  const alive = new Array(m).fill(true);
+  for (;;) {
+    let ba = -1;
+    let bb = -1;
+    let best = threshold;
+    for (let a = 0; a < m; a++) {
+      if (!alive[a]) continue;
+      const na = groups[a].length;
+      const Sa = S[a];
+      for (let b = a + 1; b < m; b++) {
+        if (!alive[b]) continue;
+        const avg = Sa[b] / (na * groups[b].length);
+        if (avg >= best) { best = avg; ba = a; bb = b; }
+      }
+    }
+    if (ba < 0) break;
+    for (let x = 0; x < m; x++) {
+      if (!alive[x] || x === ba || x === bb) continue;
+      S[ba][x] += S[bb][x];
+      S[x][ba] = S[ba][x];
+    }
+    groups[ba].push(...groups[bb]);
+    alive[bb] = false;
+  }
+  return groups.filter((g, a) => alive[a]);
 }
 
 function splitSentences(text) {

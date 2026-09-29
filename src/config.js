@@ -33,7 +33,7 @@ function defaultSettings() {
     selectedSources: SOURCES.filter((s) => s.default).map((s) => s.id),
     customSources: [],
     googleNews: true,
-    clusterThreshold: 0.3,
+    clusterThreshold: 0.25,
     llm: {
       provider: process.env.LLM_PROVIDER || 'auto', // auto | anthropic | openai | ollama | none
       model: process.env.LLM_MODEL || '',

@@ -1,0 +1,15 @@
+{
+  "name": "gesundheits-news-dashboard",
+  "version": "1.0.0",
+  "description": "Lokales Dashboard: Gesundheits- und GKV-Nachrichten aus deutschen Medien, thematisch geclustert und zusammengefasst.",
+  "main": "server.js",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=18.17" },
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server.js --demo",
+    "check-feeds": "node scripts/check-feeds.js",
+    "test": "node --test"
+  }
+}

@@ -229,7 +229,7 @@ function scoreArticle({ title = '', description = '' }, { healthFeed = false } =
     gkvScore,
     topics,
     health: score >= threshold,
-    gkv: gkvScore >= 6,
+    gkv: gkvScore >= 4,
   };
 }
 
