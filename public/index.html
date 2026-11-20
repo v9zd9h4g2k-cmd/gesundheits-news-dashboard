@@ -3,20 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gesundheits-Presseschau</title>
-  <meta name="description" content="Lokales Dashboard: Gesundheits- und GKV-Nachrichten aus deutschen Medien, thematisch gruppiert.">
+  <title>Presseschau</title>
+  <meta name="description" content="News-Dashboard: Nachrichten deutscher Medien zu Gesundheit & GKV sowie Künstlicher Intelligenz, thematisch gruppiert.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8"/><path d="M13 9h6v4h4v6h-4v4h-6v-4H9v-6h4z"/></svg>
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8"/><path d="M9 10h14M9 15h14M9 20h9"/></svg>
       <div>
-        <h1>Gesundheits-Presseschau</h1>
+        <h1>Presseschau</h1>
         <p class="stand" id="stand">Lade …</p>
       </div>
     </div>
+    <div class="areas" id="areas" role="tablist" aria-label="Themenbereich"></div>
     <div class="top-actions">
       <button class="btn ghost" id="btn-sources" title="Medien auswählen">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h10"/></svg>
@@ -36,28 +37,29 @@
     Demo-Modus: Die angezeigten Meldungen sind ausgedachte Beispieldaten.
   </div>
 
+  <p class="area-desc" id="area-desc"></p>
   <nav class="toolbar" aria-label="Filter">
     <div class="segmented" role="radiogroup" aria-label="Zeitraum">
       <button role="radio" data-hours="24" aria-checked="true">24 Std.</button>
       <button role="radio" data-hours="72" aria-checked="false">3 Tage</button>
       <button role="radio" data-hours="168" aria-checked="false">7 Tage</button>
     </div>
-    <label class="chip-toggle gkv">
-      <input type="checkbox" id="f-gkv"> <span>Nur GKV-Themen</span>
+    <label class="chip-toggle focus">
+      <input type="checkbox" id="f-focus"> <span id="f-focus-label">Nur Fokus-Themen</span>
     </label>
     <label class="chip-toggle">
       <input type="checkbox" id="f-multi"> <span>Nur mehrfach berichtet</span>
     </label>
     <div class="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input type="search" id="f-q" placeholder="Suchen, z. B. Zusatzbeitrag, ePA, Klinik …" aria-label="Meldungen durchsuchen">
+      <input type="search" id="f-q" placeholder="Suchen …" aria-label="Meldungen durchsuchen">
     </div>
     <label class="select">
       <span>Sortierung</span>
       <select id="f-sort">
         <option value="presence">Präsenz in der Presse</option>
         <option value="recent">Neueste zuerst</option>
-        <option value="gkv">GKV-Bezug zuerst</option>
+        <option value="focus">Fokus zuerst</option>
       </select>
     </label>
   </nav>
@@ -129,7 +131,7 @@
             <label>Name<input id="c-name" placeholder="z. B. Rheinische Post"></label>
             <label>RSS-Feed-URL (optional)<input id="c-url" placeholder="https://…/rss.xml"></label>
             <label>Domain für Google News (optional)<input id="c-domain" placeholder="rp-online.de"></label>
-            <label class="inline"><input type="checkbox" id="c-health"> Reiner Gesundheits-Feed</label>
+            <label class="inline"><input type="checkbox" id="c-topicfeed"> Reiner Fach-Feed zu diesem Thema</label>
             <button type="button" class="btn" id="c-add">Hinzufügen</button>
           </div>
           <p class="form-error" id="c-error"></p>
@@ -200,7 +202,7 @@
         <div class="badges"></div>
         <h3 class="cluster-title"></h3>
         <p class="summary"></p>
-        <p class="gkv-rel" hidden></p>
+        <p class="focus-note" hidden></p>
         <div class="meta-row">
           <div class="sources"></div>
           <svg class="spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true"></svg>

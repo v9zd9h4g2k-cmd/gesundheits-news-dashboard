@@ -9,6 +9,7 @@ const config = require('./src/config');
 config.loadEnv();
 
 const { CATEGORIES } = require('./src/sources');
+const { TOPICS, getTopic, isTopic, topicMeta } = require('./src/topics');
 const news = require('./src/news');
 const { summarizeCluster, briefing } = require('./src/summarize');
 
@@ -60,22 +61,25 @@ function serveStatic(req, res, pathname) {
   });
 }
 
-function sourcesPayload() {
+function sourcesPayload(topicId) {
+  const topic = getTopic(topicId);
   const s = config.getSettings();
-  const selected = new Set(s.selectedSources);
-  const categories = [...CATEGORIES];
-  if ((s.customSources || []).length) categories.push({ id: 'eigene', label: 'Eigene Quellen' });
+  const selected = new Set(s.selectedSources[topic.id] || []);
+  const sources = config.allSources().filter((src) => (src.topics || []).includes(topic.id));
+  const catIds = [...topic.categories, 'eigene'];
   return {
-    categories,
+    topic: topic.id,
+    categories: CATEGORIES.filter((c) => catIds.includes(c.id) && sources.some((src) => src.category === c.id)),
     googleNews: s.googleNews,
     demo: news.state.demo,
-    sources: config.allSources().map((src) => ({
+    sources: sources.map((src) => ({
       id: src.id,
       name: src.name,
       category: src.category,
       domain: src.domain,
       feedCount: src.feeds.length,
       custom: !!src.custom,
+      default: (src.defaults || []).includes(topic.id),
       selected: selected.has(src.id),
       status: news.state.sourceStatus[src.id] || null,
     })),
@@ -99,6 +103,10 @@ function settingsPayload() {
   };
 }
 
+function topicParam(v) {
+  return isTopic(v) ? v : TOPICS[0].id;
+}
+
 function hoursParam(v) {
   const h = Number(v);
   return [24, 72, 168].includes(h) ? h : 24;
@@ -114,8 +122,9 @@ async function handleApi(req, res, url) {
     // Beim allerersten Aufruf ohne Daten: Abruf abwarten
     if (!news.state.demo && !news.state.lastRefresh) await news.refresh({ force: true });
     return send(res, 200, news.getNews({
+      topic: topicParam(searchParams.get('topic')),
       hours: hoursParam(searchParams.get('hours')),
-      gkvOnly: searchParams.get('gkv') === '1',
+      focusOnly: searchParams.get('focus') === '1',
       q: (searchParams.get('q') || '').trim(),
     }));
   }
@@ -125,17 +134,27 @@ async function handleApi(req, res, url) {
     return send(res, 200, r);
   }
 
-  if (pathname === '/api/sources' && method === 'GET') return send(res, 200, sourcesPayload());
+  if (pathname === '/api/topics' && method === 'GET') {
+    return send(res, 200, { static: false, demo: news.state.demo, topics: TOPICS.map(topicMeta) });
+  }
+
+  if (pathname === '/api/sources' && method === 'GET') return send(res, 200, sourcesPayload(topicParam(searchParams.get('topic'))));
 
   if (pathname === '/api/sources' && method === 'PUT') {
     const body = await readBody(req);
-    const known = new Set(config.allSources().map((s) => s.id));
+    const topic = topicParam(body.topic);
+    const known = new Set(config.allSources().filter((s) => (s.topics || []).includes(topic)).map((s) => s.id));
     const patch = {};
-    if (Array.isArray(body.selectedSources)) patch.selectedSources = body.selectedSources.filter((id) => known.has(id));
+    if (Array.isArray(body.selectedSources)) {
+      patch.selectedSources = {
+        ...config.getSettings().selectedSources,
+        [topic]: body.selectedSources.filter((id) => known.has(id)),
+      };
+    }
     if (typeof body.googleNews === 'boolean') patch.googleNews = body.googleNews;
     config.saveSettings(patch);
     news.refresh({ force: true }).catch((e) => console.error(e));
-    return send(res, 200, sourcesPayload());
+    return send(res, 200, sourcesPayload(topic));
   }
 
   if (pathname === '/api/sources/custom' && method === 'POST') {
@@ -149,23 +168,26 @@ async function handleApi(req, res, url) {
       try { domain = new URL(feedUrl).hostname.replace(/^www\.|^rss\.|^feeds?\./, ''); } catch { /* egal */ }
     }
     const s = config.getSettings();
+    const topic = topicParam(body.topic);
     const id = `custom-${Date.now().toString(36)}`;
     config.saveSettings({
-      customSources: [...(s.customSources || []), { id, name, url: feedUrl, domain, health: !!body.health }],
-      selectedSources: [...s.selectedSources, id],
+      customSources: [...(s.customSources || []), { id, name, url: feedUrl, domain, topics: [topic], topicFeed: !!body.topicFeed }],
+      selectedSources: { ...s.selectedSources, [topic]: [...(s.selectedSources[topic] || []), id] },
     });
     news.refresh({ force: true }).catch((e) => console.error(e));
-    return send(res, 200, sourcesPayload());
+    return send(res, 200, sourcesPayload(topic));
   }
 
   const delMatch = pathname.match(/^\/api\/sources\/custom\/([\w-]+)$/);
   if (delMatch && method === 'DELETE') {
     const s = config.getSettings();
+    const sel = {};
+    for (const [t, ids] of Object.entries(s.selectedSources)) sel[t] = ids.filter((x) => x !== delMatch[1]);
     config.saveSettings({
       customSources: (s.customSources || []).filter((c) => c.id !== delMatch[1]),
-      selectedSources: s.selectedSources.filter((x) => x !== delMatch[1]),
+      selectedSources: sel,
     });
-    return send(res, 200, sourcesPayload());
+    return send(res, 200, sourcesPayload(topicParam(searchParams.get('topic'))));
   }
 
   if (pathname === '/api/settings' && method === 'GET') return send(res, 200, settingsPayload());
@@ -191,9 +213,10 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/summaries' && method === 'POST') {
     const body = await readBody(req);
     const hours = hoursParam(body.hours);
+    const topic = getTopic(topicParam(body.topic));
     const ids = Array.isArray(body.ids) ? body.ids.slice(0, 20) : [];
     if (config.resolveLlm().provider === 'none') return send(res, 200, { enabled: false, results: {} });
-    const { clusters } = news.getNews({ hours });
+    const { clusters } = news.getNews({ hours, topic: topic.id });
     const byId = new Map(clusters.map((c) => [c.id, c]));
     const results = {};
     const errors = {};
@@ -205,7 +228,7 @@ async function handleApi(req, res, url) {
         if (!c) continue;
         try {
           // gleiche Gruppe nicht parallel doppelt anfragen
-          if (!summaryJobs.has(c.key)) summaryJobs.set(c.key, summarizeCluster(c).finally(() => summaryJobs.delete(c.key)));
+          if (!summaryJobs.has(c.key)) summaryJobs.set(c.key, summarizeCluster(c, topic).finally(() => summaryJobs.delete(c.key)));
           results[id] = await summaryJobs.get(c.key);
         } catch (e) {
           errors[id] = e.message;
@@ -221,9 +244,10 @@ async function handleApi(req, res, url) {
     if (config.resolveLlm().provider === 'none') {
       return send(res, 400, { error: 'Für das Lagebild bitte in den Einstellungen einen KI-Anbieter hinterlegen.' });
     }
-    const data = news.getNews({ hours: hoursParam(body.hours), gkvOnly: !!body.gkv });
+    const topic = getTopic(topicParam(body.topic));
+    const data = news.getNews({ hours: hoursParam(body.hours), focusOnly: !!body.focus, topic: topic.id });
     try {
-      return send(res, 200, await briefing(data.clusters));
+      return send(res, 200, await briefing(data.clusters, topic));
     } catch (e) {
       return send(res, 502, { error: e.message });
     }
@@ -256,7 +280,7 @@ function start() {
   }
   server.listen(PORT, HOST, () => {
     const llm = config.resolveLlm();
-    console.log(`Gesundheits-Presseschau läuft auf http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+    console.log(`Presseschau läuft auf http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
     console.log(`KI-Zusammenfassungen: ${llm.provider === 'none' ? 'aus (extraktive Zusammenfassung)' : `${llm.provider} / ${llm.model}`}`);
   });
 }

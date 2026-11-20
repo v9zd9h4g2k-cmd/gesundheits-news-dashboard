@@ -1,7 +1,7 @@
 {
   "name": "gesundheits-news-dashboard",
-  "version": "1.0.0",
-  "description": "Lokales Dashboard: Gesundheits- und GKV-Nachrichten aus deutschen Medien, thematisch geclustert und zusammengefasst.",
+  "version": "2.0.0",
+  "description": "News-Dashboard: Nachrichten deutscher Medien zu Gesundheit & GKV sowie Künstlicher Intelligenz, thematisch geclustert und zusammengefasst.",
   "main": "server.js",
   "private": true,
   "license": "MIT",

@@ -4,10 +4,10 @@
 /**
  * Statischer Build für GitHub Pages (kein eigener Webserver nötig).
  *
- * Ruft alle Quellen ab, bewertet und gruppiert die Meldungen, erzeugt optional
- * KI-Zusammenfassungen und schreibt Oberfläche + JSON-Daten nach ./site.
- * Der Zustand (Artikel-Historie, KI-Cache) wird vom zuletzt veröffentlichten
- * Stand übernommen, damit auch die 7-Tage-Sicht vollständig ist.
+ * Ruft alle Quellen aller Themenbereiche ab, bewertet und gruppiert die Meldungen
+ * je Thema, erzeugt optional KI-Zusammenfassungen und schreibt Oberfläche +
+ * JSON-Daten nach ./site. Der Zustand (Artikel-Historie, KI-Cache) wird vom zuletzt
+ * veröffentlichten Stand übernommen, damit auch die 7-Tage-Sicht vollständig ist.
  *
  *   node scripts/build-static.js            # echte Feeds
  *   node scripts/build-static.js --demo     # Beispieldaten
@@ -15,7 +15,7 @@
  * Umgebungsvariablen:
  *   PAGES_URL          URL der veröffentlichten Seite (für den Vorzustand)
  *   ANTHROPIC_API_KEY / OPENAI_API_KEY  optional für KI-Zusammenfassungen
- *   MAX_AI_PER_RUN     max. neue KI-Zusammenfassungen je Lauf (Standard 60)
+ *   MAX_AI_PER_RUN     max. neue KI-Zusammenfassungen je Lauf (Standard 80, auf die Themen verteilt)
  */
 
 const fs = require('fs');
@@ -32,13 +32,13 @@ const config = require('../src/config');
 config.loadEnv();
 
 const { CATEGORIES, SOURCES } = require('../src/sources');
+const { TOPICS, topicMeta } = require('../src/topics');
 const news = require('../src/news');
-const { scoreArticle } = require('../src/relevance');
 const { summarizeCluster, briefing } = require('../src/summarize');
 
 const DEMO = process.argv.includes('--demo');
 const HOURS = [24, 72, 168];
-const MAX_AI = Number(process.env.MAX_AI_PER_RUN) || 60;
+const MAX_AI = Number(process.env.MAX_AI_PER_RUN) || 80;
 
 async function download(url, file) {
   try {
@@ -68,10 +68,24 @@ function writeJson(rel, data) {
   fs.writeFileSync(file, JSON.stringify(data));
 }
 
+/** Kurzer Bericht über Feeds, die nicht erreichbar waren (im Actions-Protokoll sichtbar). */
+function reportFeeds() {
+  let ok = 0;
+  const failed = [];
+  for (const [id, st] of Object.entries(news.state.sourceStatus)) {
+    for (const f of st.feeds || []) {
+      if (f.ok) ok++;
+      else failed.push(`${id} [${f.via}${f.topic ? `/${f.topic}` : ''}]: ${f.error}  ${f.via === 'rss' ? f.url : ''}`);
+    }
+  }
+  console.log(`Feeds: ${ok} ok, ${failed.length} fehlgeschlagen`);
+  for (const line of failed) console.log(`  ✘ ${line}`);
+}
+
 async function main() {
   const t0 = Date.now();
   // Alle Quellen abrufen – die Auswahl trifft jede:r Nutzer:in im Browser.
-  config.saveSettings({ selectedSources: SOURCES.map((s) => s.id), googleNews: true });
+  config.saveSettings({ googleNews: true });
 
   if (DEMO) {
     news.enableDemo(require('../src/demo-data').demoArticles());
@@ -84,37 +98,42 @@ async function main() {
     }
     news.loadStore();
     console.log(`  ${news.state.articles.size} Artikel aus dem Vorzustand`);
-    await news.refresh({ force: true });
+    await news.refresh({ force: true, all: true });
+    reportFeeds();
   }
 
-  // KI-Zusammenfassungen (nur neue Themengruppen, begrenzt je Lauf)
+  // KI-Zusammenfassungen (nur neue Themengruppen, Budget auf die Themen verteilt)
   const llm = config.resolveLlm();
   const briefings = {};
   if (llm.provider !== 'none') {
     console.log(`KI: ${llm.provider} / ${llm.model}`);
-    const seen = new Set();
-    const todo = [];
-    for (const h of HOURS) {
-      const { clusters } = news.getNews({ hours: h });
-      const limit = h === 24 ? 50 : 30;
-      for (const c of clusters.slice(0, limit)) {
-        if (c.ai || seen.has(c.key)) continue;
-        if (c.sourceCount < 2 && !c.gkv && h !== 24) continue;
-        seen.add(c.key);
-        todo.push(c);
+    const perTopic = Math.max(10, Math.floor(MAX_AI / TOPICS.length));
+    for (const topic of TOPICS) {
+      const seen = new Set();
+      const todo = [];
+      for (const h of HOURS) {
+        const { clusters } = news.getNews({ topic: topic.id, hours: h, allSources: true });
+        const limit = h === 24 ? 50 : 30;
+        for (const c of clusters.slice(0, limit)) {
+          if (c.ai || seen.has(c.key)) continue;
+          if (c.sourceCount < 2 && !c.focus && h !== 24) continue;
+          seen.add(c.key);
+          todo.push(c);
+        }
       }
-    }
-    let done = 0;
-    let failed = 0;
-    for (const c of todo.slice(0, MAX_AI)) {
-      try { await summarizeCluster(c); done++; } catch (e) { failed++; if (failed <= 3) console.log(`  KI-Fehler: ${e.message}`); }
-    }
-    console.log(`  ${done} neue Zusammenfassungen, ${failed} Fehler, ${Math.max(0, todo.length - MAX_AI)} auf den nächsten Lauf verschoben`);
-    for (const h of HOURS) {
-      try {
-        briefings[h] = await briefing(news.getNews({ hours: h }).clusters);
-      } catch (e) {
-        console.log(`  Lagebild ${h}h fehlgeschlagen: ${e.message}`);
+      let done = 0;
+      let failed = 0;
+      for (const c of todo.slice(0, perTopic)) {
+        try { await summarizeCluster(c, topic); done++; } catch (e) { failed++; if (failed <= 3) console.log(`  KI-Fehler: ${e.message}`); }
+      }
+      console.log(`  ${topic.short}: ${done} neue Zusammenfassungen, ${failed} Fehler, ${Math.max(0, todo.length - perTopic)} auf den nächsten Lauf verschoben`);
+      briefings[topic.id] = {};
+      for (const h of HOURS) {
+        try {
+          briefings[topic.id][h] = await briefing(news.getNews({ topic: topic.id, hours: h, allSources: true }).clusters, topic);
+        } catch (e) {
+          console.log(`  Lagebild ${topic.short} ${h}h fehlgeschlagen: ${e.message}`);
+        }
       }
     }
     await new Promise((r) => setTimeout(r, 700)); // Cache-Datei schreiben lassen
@@ -127,16 +146,20 @@ async function main() {
   copyDir(path.join(ROOT, 'public'), OUT);
 
   const builtAt = new Date().toISOString();
-  for (const h of HOURS) {
-    const data = news.getNews({ hours: h });
-    // Teaser in Artikellisten kürzen, um die Dateien klein zu halten
-    for (const c of data.clusters) {
-      c.articles = c.articles.map((a) => ({
-        id: a.id, title: a.title, link: a.link, date: a.date, sourceId: a.sourceId, sourceName: a.sourceName,
-        via: a.via, gkv: a.gkv, topics: a.topics, description: (a.description || '').slice(0, 320),
-      }));
+  const summary = [];
+  for (const topic of TOPICS) {
+    for (const h of HOURS) {
+      const data = news.getNews({ topic: topic.id, hours: h, allSources: true });
+      // Teaser in Artikellisten kürzen, um die Dateien klein zu halten
+      for (const c of data.clusters) {
+        c.articles = c.articles.map((a) => ({
+          id: a.id, title: a.title, link: a.link, date: a.date, sourceId: a.sourceId, sourceName: a.sourceName,
+          via: a.via, focus: a.focus, topics: a.topics, description: (a.description || '').slice(0, 320),
+        }));
+      }
+      writeJson(`data/${topic.id}/news-${h}.json`, { ...data, builtAt, briefing: briefings[topic.id]?.[h] || null });
+      if (h === 24) summary.push(`${topic.short}: ${data.stats.articles} Meldungen / ${data.stats.clusters} Themen`);
     }
-    writeJson(`data/news-${h}.json`, { ...data, builtAt, briefing: briefings[h] || null });
   }
 
   writeJson('data/sources.json', {
@@ -147,7 +170,8 @@ async function main() {
       category: s.category,
       domain: s.domain,
       feedCount: s.feeds.length,
-      default: !!s.default,
+      topics: s.topics || [],
+      defaults: s.defaults || [],
       status: news.state.sourceStatus[s.id] || null,
     })),
   });
@@ -157,11 +181,12 @@ async function main() {
     demo: news.state.demo,
     builtAt,
     ai: llm.provider === 'none' ? null : { provider: llm.provider, model: llm.model },
+    topics: TOPICS.map(topicMeta),
   });
 
-  // Zustand für den nächsten Lauf: nur gesundheitsrelevante Artikel behalten
+  // Zustand für den nächsten Lauf: nur Artikel behalten, die zu einem Thema passen
   if (!DEMO) {
-    const keep = [...news.state.articles.values()].filter((a) => scoreArticle(a, { healthFeed: a.healthFeed }).health);
+    const keep = [...news.state.articles.values()].filter((a) => news.relevantForAnyTopic(a));
     writeJson('data/state.json', {
       lastRefresh: news.state.lastRefresh,
       sourceStatus: news.state.sourceStatus,
@@ -174,8 +199,7 @@ async function main() {
   }
   fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 
-  const n = news.getNews({ hours: 24 });
-  console.log(`Fertig in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${n.stats.articles} Meldungen / ${n.stats.clusters} Themen (24 h) → ${OUT}`);
+  console.log(`Fertig in ${((Date.now() - t0) / 1000).toFixed(1)} s (24 h): ${summary.join(' · ')} → ${OUT}`);
   fs.rmSync(WORK, { recursive: true, force: true });
 }
 

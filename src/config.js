@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { SOURCES } = require('./sources');
+const { TOPICS } = require('./topics');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
@@ -28,9 +29,16 @@ function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+/** Vorauswahl je Themenbereich: { gesundheit: [ids], ki: [ids] } */
+function defaultSelection() {
+  const sel = {};
+  for (const t of TOPICS) sel[t.id] = SOURCES.filter((s) => (s.defaults || []).includes(t.id)).map((s) => s.id);
+  return sel;
+}
+
 function defaultSettings() {
   return {
-    selectedSources: SOURCES.filter((s) => s.default).map((s) => s.id),
+    selectedSources: defaultSelection(),
     customSources: [],
     googleNews: true,
     clusterThreshold: 0.25,
@@ -51,6 +59,9 @@ function getSettings() {
   try {
     const stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
     cached = { ...base, ...stored, llm: { ...base.llm, ...(stored.llm || {}) } };
+    // Altes Format (eine Liste nur für Gesundheit) übernehmen; fehlende Themen ergänzen
+    if (Array.isArray(stored.selectedSources)) cached.selectedSources = { gesundheit: stored.selectedSources };
+    cached.selectedSources = { ...base.selectedSources, ...cached.selectedSources };
   } catch {
     cached = base;
   }
@@ -67,6 +78,11 @@ function saveSettings(patch) {
   return next;
 }
 
+/** Gewählte Quellen eines Themas (Set). */
+function selectedFor(topicId) {
+  return new Set(getSettings().selectedSources[topicId] || []);
+}
+
 /** Alle Quellen: Standard + eigene. */
 function allSources() {
   const s = getSettings();
@@ -75,7 +91,9 @@ function allSources() {
     name: c.name,
     category: 'eigene',
     domain: c.domain || '',
-    feeds: c.url ? [{ url: c.url, health: !!c.health }] : [],
+    topics: c.topics || ['gesundheit'],
+    defaults: [],
+    feeds: c.url ? [{ url: c.url, topic: c.topicFeed ? (c.topics || ['gesundheit'])[0] : undefined }] : [],
     custom: true,
   }));
   return [...SOURCES, ...custom];
@@ -107,5 +125,5 @@ function resolveLlm() {
 }
 
 module.exports = {
-  ROOT, DATA_DIR, loadEnv, ensureDataDir, getSettings, saveSettings, allSources, resolveLlm,
+  ROOT, DATA_DIR, loadEnv, ensureDataDir, getSettings, saveSettings, allSources, selectedFor, resolveLlm,
 };

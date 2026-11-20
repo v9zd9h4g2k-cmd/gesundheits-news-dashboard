@@ -1,26 +1,17 @@
 'use strict';
 
-const TOPIC_LABELS = {
-  gkv: 'GKV & Kassen',
-  finanzen: 'Finanzen & Beiträge',
-  politik: 'Gesundheitspolitik',
-  klinik: 'Krankenhaus',
-  praxis: 'Ärzte & Praxen',
-  pflege: 'Pflege',
-  pharma: 'Arzneimittel & Apotheke',
-  digital: 'Digitalisierung',
-  medizin: 'Medizin & Forschung',
-  arbeit: 'Arbeit & Krankenstand',
-};
 const PAGE = 30;
 
 const state = {
+  area: null, // aktueller Themenbereich (z. B. gesundheit, ki)
+  meta: null, // Beschreibung des Themenbereichs (Labels, Themenfelder, Fokus)
+  topics: [], // alle Themenbereiche
   hours: 24,
-  gkv: false,
+  focus: false,
   multi: false,
   q: '',
   sort: 'presence',
-  topic: null,
+  field: null, // Filter auf ein Themenfeld
   data: null,
   shown: PAGE,
   llmActive: false,
@@ -29,19 +20,28 @@ const state = {
   static: false, // GitHub-Pages-Modus: Daten kommen als JSON-Dateien
   site: null,
   selected: null, // Quellenauswahl im statischen Modus (localStorage)
+  staticSources: null,
 };
 
-const SEL_KEY = 'gnd.selectedSources';
-function loadSelection(sources) {
+function fieldLabel(k) {
+  return state.meta?.fields?.[k] || k;
+}
+
+// Quellenauswahl je Themenbereich im Browser speichern (statischer Modus)
+const selKey = (area) => `gnd.selectedSources.${area}`;
+function loadSelection(sources, area) {
   try {
-    const raw = localStorage.getItem(SEL_KEY);
+    // ältere Version speicherte nur die Gesundheits-Auswahl unter diesem Schlüssel
+    const raw = localStorage.getItem(selKey(area)) || (area === 'gesundheit' ? localStorage.getItem('gnd.selectedSources') : null);
     if (raw) return new Set(JSON.parse(raw));
   } catch { /* privater Modus o. Ä. */ }
-  return new Set(sources.filter((x) => x.default).map((x) => x.id));
+  return new Set(sources.filter((x) => (x.defaults || []).includes(area)).map((x) => x.id));
 }
-function saveSelection(set) {
-  try { localStorage.setItem(SEL_KEY, JSON.stringify([...set])); } catch { /* egal */ }
+function saveSelection(set, area) {
+  try { localStorage.setItem(selKey(area), JSON.stringify([...set])); } catch { /* egal */ }
 }
+function storeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function storeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* egal */ } }
 
 async function getJson(path) {
   const res = await fetch(`${path}${path.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
@@ -74,7 +74,7 @@ function applySelection(data) {
     const dates = articles.map((a) => a.date).filter(Boolean).sort();
     c.firstSeen = dates[0];
     c.lastSeen = dates[dates.length - 1];
-    c.presence = c.sourceCount * 3 + c.articleCount + (c.gkv ? 2 : 0);
+    c.presence = c.sourceCount * 3 + c.articleCount + (c.focus ? 2 : 0);
     const tl = new Array(buckets).fill(0);
     for (const a of articles) {
       const i = Math.floor((new Date(a.date).getTime() - start) / span);
@@ -150,8 +150,9 @@ async function load({ quiet = false } = {}) {
   }
   try {
     const data = state.static
-      ? applySelection(await getJson(`data/news-${state.hours}.json`))
-      : await api(`api/news?hours=${state.hours}`);
+      ? applySelection(await getJson(`data/${state.area}/news-${state.hours}.json`))
+      : await api(`api/news?topic=${state.area}&hours=${state.hours}`);
+    if (data.topic && data.topic !== state.area) return; // inzwischen umgeschaltet
     state.data = data;
     if (!quiet) state.shown = PAGE;
     $('#demo-banner').hidden = !data.demo;
@@ -164,9 +165,9 @@ async function load({ quiet = false } = {}) {
 function filtered() {
   if (!state.data) return [];
   let list = state.data.clusters;
-  if (state.gkv) list = list.filter((c) => c.gkv);
+  if (state.focus) list = list.filter((c) => c.focus);
   if (state.multi) list = list.filter((c) => c.sourceCount > 1);
-  if (state.topic) list = list.filter((c) => c.topics.includes(state.topic));
+  if (state.field) list = list.filter((c) => c.topics.includes(state.field));
   if (state.q) {
     const words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
     list = list.filter((c) => {
@@ -177,7 +178,7 @@ function filtered() {
   }
   list = [...list];
   if (state.sort === 'recent') list.sort((a, b) => (b.lastSeen || '').localeCompare(a.lastSeen || ''));
-  if (state.sort === 'gkv') list.sort((a, b) => (b.gkv - a.gkv) || (b.gkvScore - a.gkvScore) || (b.presence - a.presence));
+  if (state.sort === 'focus') list.sort((a, b) => (b.focus - a.focus) || (b.focusScore - a.focusScore) || (b.presence - a.presence));
   return list;
 }
 
@@ -197,8 +198,8 @@ function render() {
   renderTopics(d.stats.topics);
 
   const label = { 24: 'letzte 24 Stunden', 72: 'letzte 3 Tage', 168: 'letzte 7 Tage' }[state.hours];
-  $('#feed-title').textContent = state.gkv ? 'GKV-Themen' : 'Themen';
-  $('#feed-sub').textContent = `${list.length} Themen · ${label}${state.topic ? ` · ${TOPIC_LABELS[state.topic]}` : ''}`;
+  $('#feed-title').textContent = state.focus ? state.meta.focus.titleLabel : 'Themen';
+  $('#feed-sub').textContent = `${list.length} Themen · ${label}${state.field ? ` · ${fieldLabel(state.field)}` : ''}`;
 
   const box = $('#clusters');
   box.innerHTML = '';
@@ -222,14 +223,14 @@ function render() {
 
 function renderKpis(stats, list) {
   const articles = list.reduce((n, c) => n + c.articleCount, 0);
-  const gkvArticles = list.filter((c) => c.gkv).reduce((n, c) => n + c.articleCount, 0);
+  const focusArticles = list.filter((c) => c.focus).reduce((n, c) => n + c.articleCount, 0);
   const sources = new Set(list.flatMap((c) => c.sources.map((s) => s.id))).size;
-  const share = articles ? Math.round((gkvArticles / articles) * 100) : 0;
+  const share = articles ? Math.round((focusArticles / articles) * 100) : 0;
   $('#kpis').innerHTML = `
     <div class="kpi"><div class="v">${articles}</div><div class="l">Meldungen</div></div>
     <div class="kpi"><div class="v">${list.length}</div><div class="l">Themen</div></div>
     <div class="kpi"><div class="v">${sources}</div><div class="l">berichtende Medien</div></div>
-    <div class="kpi gkv"><div class="v">${share}&thinsp;%</div><div class="l">mit GKV-Bezug</div></div>`;
+    <div class="kpi focus"><div class="v">${share}&thinsp;%</div><div class="l">${esc(state.meta.focus.kpiLabel)}</div></div>`;
 }
 
 function renderToplist(list) {
@@ -239,8 +240,8 @@ function renderToplist(list) {
     <li data-id="${c.id}">
       <div class="t">${esc(c.ai?.title || c.title)}</div>
       <div class="bar-row">
-        <div class="bar ${c.gkv ? 'gkv' : ''}" style="width:${Math.max(4, (c.sourceCount / max) * 78)}%"></div>
-        <span class="n">${c.sourceCount} Medien · ${c.articleCount}×</span>
+        <div class="bar ${c.focus ? 'focus' : ''}" style="width:${Math.max(4, (c.sourceCount / max) * 78)}%"></div>
+        <span class="n">${c.sourceCount} ${c.sourceCount === 1 ? 'Medium' : 'Medien'} · ${c.articleCount}×</span>
       </div>
     </li>`).join('') || '<li class="muted">–</li>';
 }
@@ -248,7 +249,7 @@ function renderToplist(list) {
 function renderTopics(topics) {
   const entries = Object.entries(topics).sort((a, b) => b[1] - a[1]);
   $('#topics').innerHTML = entries.map(([k, n]) =>
-    `<button class="topic-pill ${state.topic === k ? 'active' : ''}" data-topic="${k}">${esc(TOPIC_LABELS[k] || k)}<b>${n}</b></button>`,
+    `<button class="topic-pill ${state.field === k ? 'active' : ''}" data-field="${k}">${esc(fieldLabel(k))}<b>${n}</b></button>`,
   ).join('') || '<span class="muted">–</span>';
 }
 
@@ -266,7 +267,7 @@ function renderCluster(c) {
   const el = $('#tpl-cluster').content.firstElementChild.cloneNode(true);
   el.id = `c-${c.id}`;
   el.dataset.id = c.id;
-  if (c.gkv) el.classList.add('is-gkv');
+  if (c.focus) el.classList.add('is-focus');
 
   const presence = $('.presence', el);
   $('.presence-num', el).textContent = c.sourceCount;
@@ -279,10 +280,10 @@ function renderCluster(c) {
   presence.append(dots);
 
   const badges = [];
-  if (c.gkv) badges.push('<span class="badge gkv">GKV</span>');
+  if (c.focus) badges.push(`<span class="badge focus">${esc(state.meta.focus.badge)}</span>`);
   const ageH = (Date.now() - new Date(c.firstSeen).getTime()) / 3600e3;
   if (ageH < 4) badges.push('<span class="badge new">Neu</span>');
-  for (const t of c.topics.filter((t) => t !== 'gkv').slice(0, 2)) badges.push(`<span class="badge">${esc(TOPIC_LABELS[t] || t)}</span>`);
+  for (const t of c.topics.filter((t) => t !== state.meta.focus.id).slice(0, 2)) badges.push(`<span class="badge">${esc(fieldLabel(t))}</span>`);
   badges.push(`<span class="badge ai">zuletzt ${relTime(c.lastSeen)}</span>`);
   $('.badges', el).innerHTML = badges.join('');
 
@@ -313,14 +314,15 @@ function renderCluster(c) {
 
 function applySummary(el, c) {
   const p = $('.summary', el);
-  const rel = $('.gkv-rel', el);
+  const rel = $('.focus-note', el);
   if (c.ai) {
     p.textContent = c.ai.summary;
     p.classList.remove('loading');
     p.title = 'KI-Zusammenfassung';
-    if (c.ai.gkvRelevance && !/^kein direkter gkv-bezug/i.test(c.ai.gkvRelevance)) {
+    const note = c.ai.focusNote || c.ai.gkvRelevance || '';
+    if (note && !/^kein direkter/i.test(note)) {
       rel.hidden = false;
-      rel.innerHTML = `<b>GKV-Relevanz:</b> ${esc(c.ai.gkvRelevance)}`;
+      rel.innerHTML = `<b>${esc(state.meta.focus.noteLabel)}:</b> ${esc(note)}`;
     }
     if (c.ai.title) $('.cluster-title a', el).textContent = c.ai.title;
   } else if (state.llmActive && !c.aiFailed) {
@@ -344,7 +346,7 @@ function requestAiSummaries(clusters) {
     const batch = todo.slice(i, i + 6);
     aiQueue = aiQueue.then(async () => {
       try {
-        const r = await api('api/summaries', { method: 'POST', body: { hours: state.hours, ids: batch.map((c) => c.id) } });
+        const r = await api('api/summaries', { method: 'POST', body: { topic: state.area, hours: state.hours, ids: batch.map((c) => c.id) } });
         for (const c of batch) {
           if (r.results?.[c.id]) c.ai = r.results[c.id];
           else c.aiFailed = true;
@@ -370,7 +372,7 @@ function showBriefing(b) {
   const box = $('#briefing');
   box.classList.remove('muted');
   box.innerHTML = `<p>${esc(b.intro)}</p><ul>${b.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
-    ${b.watch.length ? `<div class="watch"><b>Im Blick behalten:</b> ${b.watch.map(esc).join(' · ')}</div>` : ''}`;
+    ${b.watch.length ? `<div class="watch"><b>${esc(state.meta.outlookLabel)}:</b> ${b.watch.map(esc).join(' · ')}</div>` : ''}`;
 }
 
 async function createBriefing() {
@@ -388,7 +390,7 @@ async function createBriefing() {
   box.classList.add('muted');
   box.textContent = 'Lagebild wird erstellt …';
   try {
-    const b = await api('api/briefing', { method: 'POST', body: { hours: state.hours, gkv: state.gkv } });
+    const b = await api('api/briefing', { method: 'POST', body: { topic: state.area, hours: state.hours, focus: state.focus } });
     showBriefing(b);
     btn.textContent = 'Neu erstellen';
   } catch (e) {
@@ -442,19 +444,24 @@ function updateSelCount() {
 async function openSources() {
   if (state.static) {
     const s = await getJson('data/sources.json');
-    state.sources = { ...s, googleNews: true, sources: s.sources.map((x) => ({ ...x, selected: state.selected.has(x.id) })) };
+    state.staticSources = s.sources;
+    const sources = s.sources.filter((x) => (x.topics || []).includes(state.area));
+    state.sources = {
+      googleNews: true,
+      categories: s.categories.filter((c) => state.meta.categories.includes(c.id)),
+      sources: sources.map((x) => ({
+        ...x, selected: state.selected.has(x.id), default: (x.defaults || []).includes(state.area),
+      })),
+    };
     renderSourceDialog();
     $('#dlg-sources').showModal();
     return;
   }
-  state.sources = await api('api/sources');
-  state.defaultIds = null;
+  state.sources = await api(`api/sources?topic=${state.area}`);
   renderSourceDialog();
   $('#dlg-sources').showModal();
 }
 
-const DEFAULT_IDS = ['tagesschau', 'spiegel', 'zeit', 'sz', 'faz', 'welt', 'tagesspiegel', 'rnd', 'handelsblatt', 'zdf', 'dlf',
-  'aerzteblatt', 'aerztezeitung', 'apothekeadhoc', 'pz', 'daz', 'kma', 'bmg', 'gba', 'gkvsv'];
 
 function wireSourceDialog() {
   $('#source-groups').addEventListener('change', updateSelCount);
@@ -468,14 +475,15 @@ function wireSourceDialog() {
     }
     if (del) {
       e.preventDefault();
-      state.sources = await api(`api/sources/custom/${del}`, { method: 'DELETE' });
+      state.sources = await api(`api/sources/custom/${del}?topic=${state.area}`, { method: 'DELETE' });
       renderSourceDialog();
     }
   });
   $$('[data-bulk]').forEach((b) => b.addEventListener('click', () => {
     const mode = b.dataset.bulk;
+    const defaultIds = new Set(state.sources.sources.filter((x) => x.default).map((x) => x.id));
     $$('#source-groups input').forEach((i) => {
-      i.checked = mode === 'all' ? true : mode === 'none' ? false : DEFAULT_IDS.includes(i.value);
+      i.checked = mode === 'all' ? true : mode === 'none' ? false : defaultIds.has(i.value);
     });
     updateSelCount();
   }));
@@ -484,7 +492,7 @@ function wireSourceDialog() {
     try {
       state.sources = await api('api/sources/custom', {
         method: 'POST',
-        body: { name: $('#c-name').value, url: $('#c-url').value, domain: $('#c-domain').value, health: $('#c-health').checked },
+        body: { topic: state.area, name: $('#c-name').value, url: $('#c-url').value, domain: $('#c-domain').value, topicFeed: $('#c-topicfeed').checked },
       });
       ['#c-name', '#c-url', '#c-domain'].forEach((s) => { $(s).value = ''; });
       renderSourceDialog();
@@ -498,12 +506,12 @@ function wireSourceDialog() {
     const selected = $$('#source-groups input:checked').map((i) => i.value);
     if (state.static) {
       state.selected = new Set(selected);
-      saveSelection(state.selected);
+      saveSelection(state.selected, state.area);
       toast('Quellenauswahl gespeichert (in diesem Browser)');
       await load({ quiet: true });
       return;
     }
-    await api('api/sources', { method: 'PUT', body: { selectedSources: selected, googleNews: $('#s-google').checked } });
+    await api('api/sources', { method: 'PUT', body: { topic: state.area, selectedSources: selected, googleNews: $('#s-google').checked } });
     toast('Quellen gespeichert – Feeds werden abgerufen …');
     await load({ quiet: true });
     setTimeout(() => load({ quiet: true }), 8000);
@@ -564,7 +572,7 @@ function wire() {
     state.aiRequested.clear();
     load();
   }));
-  $('#f-gkv').addEventListener('change', (e) => { state.gkv = e.target.checked; state.shown = PAGE; render(); });
+  $('#f-focus').addEventListener('change', (e) => { state.focus = e.target.checked; state.shown = PAGE; render(); });
   $('#f-multi').addEventListener('change', (e) => { state.multi = e.target.checked; state.shown = PAGE; render(); });
   $('#f-sort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
   let t;
@@ -574,9 +582,9 @@ function wire() {
   });
   $('#btn-more').addEventListener('click', () => { state.shown += PAGE; render(); });
   $('#topics').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-topic]');
+    const b = e.target.closest('[data-field]');
     if (!b) return;
-    state.topic = state.topic === b.dataset.topic ? null : b.dataset.topic;
+    state.field = state.field === b.dataset.field ? null : b.dataset.field;
     state.shown = PAGE;
     render();
   });
@@ -604,11 +612,61 @@ function wire() {
       b.classList.remove('spinning');
     }
   });
+  $('#areas').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-area]');
+    if (b && b.dataset.area !== state.area) switchArea(b.dataset.area);
+  });
+  window.addEventListener('hashchange', () => {
+    const id = location.hash.slice(1);
+    if (id && id !== state.area && state.topics.some((t) => t.id === id)) switchArea(id);
+  });
   $('#btn-sources').addEventListener('click', openSources);
   $('#btn-settings').addEventListener('click', openSettings);
   $('#btn-briefing').addEventListener('click', createBriefing);
   wireSourceDialog();
   wireSettings();
+}
+
+// ---- Themenbereiche --------------------------------------------------------------------
+function renderAreas() {
+  $('#areas').innerHTML = state.topics.map((t) => `
+    <button role="tab" data-area="${esc(t.id)}" aria-selected="${t.id === state.area}" title="${esc(t.description)}">
+      <span class="area-long">${esc(t.label)}</span><span class="area-short">${esc(t.short)}</span>
+    </button>`).join('');
+}
+
+/** Beschriftungen, Farben und Filter an den Themenbereich anpassen. */
+function applyMeta() {
+  const m = state.meta;
+  document.body.dataset.area = m.id;
+  document.title = `Presseschau · ${m.label}`;
+  $('#area-desc').textContent = m.description;
+  $('#f-focus-label').textContent = m.focus.filterLabel;
+  $('#f-sort option[value="focus"]').textContent = `${m.focus.badge}-Bezug zuerst`;
+  $('#f-q').placeholder = m.searchPlaceholder;
+  const briefing = $('#briefing');
+  briefing.classList.add('muted');
+  briefing.textContent = `Kurzes KI-Lagebild der wichtigsten ${m.short}-Themen im gewählten Zeitraum.`;
+  $('#btn-briefing').textContent = state.static ? 'Anzeigen' : 'Erstellen';
+  renderAreas();
+}
+
+async function switchArea(id, { initial = false } = {}) {
+  const meta = state.topics.find((t) => t.id === id) || state.topics[0];
+  state.area = meta.id;
+  state.meta = meta;
+  state.field = null;
+  state.focus = false;
+  $('#f-focus').checked = false;
+  state.q = '';
+  $('#f-q').value = '';
+  state.shown = PAGE;
+  state.aiRequested.clear();
+  storeSet('gnd.area', meta.id);
+  if (location.hash.slice(1) !== meta.id) history.replaceState(null, '', `#${meta.id}`);
+  if (state.static) state.selected = loadSelection(state.staticSources, meta.id);
+  applyMeta();
+  if (!initial) await load();
 }
 
 async function init() {
@@ -618,25 +676,28 @@ async function init() {
     state.static = !!state.site.static;
   } catch { /* lokaler Server-Modus */ }
   if (state.static) {
+    state.topics = state.site.topics || [];
     document.body.classList.add('static');
-    const src = await getJson('data/sources.json');
-    state.selected = loadSelection(src.sources);
+    state.staticSources = (await getJson('data/sources.json')).sources;
     $('#btn-settings').hidden = true;
     $('#btn-refresh .lbl').textContent = 'Neu laden';
     $('#btn-refresh').title = 'Neuesten Datenstand laden';
-    $('#btn-briefing').textContent = 'Anzeigen';
-    await load();
-    setInterval(() => load({ quiet: true }), 10 * 60e3);
-    return;
+  } else {
+    try {
+      state.topics = (await api('api/topics')).topics;
+      const s = await api('api/settings');
+      state.llmActive = s.llm.active !== 'none';
+      if (!state.llmActive) $('#btn-briefing').title = 'Benötigt einen KI-Anbieter (Einstellungen)';
+    } catch (e) {
+      $('#clusters').innerHTML = `<div class="empty-state"><h3>Server nicht erreichbar</h3><p>${esc(e.message)}</p></div>`;
+      return;
+    }
   }
-  try {
-    const s = await api('api/settings');
-    state.llmActive = s.llm.active !== 'none';
-    if (!state.llmActive) $('#btn-briefing').title = 'Benötigt einen KI-Anbieter (Einstellungen)';
-  } catch { /* egal */ }
+  const wanted = location.hash.slice(1) || storeGet('gnd.area');
+  await switchArea(wanted, { initial: true });
   await load();
-  // alle 5 Minuten still neu laden (der Server ruft die Feeds regelmäßig ab)
-  setInterval(() => load({ quiet: true }), 5 * 60e3);
+  // still neu laden: statisch alle 10 Min. (GitHub aktualisiert alle 30 Min.), lokal alle 5 Min.
+  setInterval(() => load({ quiet: true }), (state.static ? 10 : 5) * 60e3);
 }
 
 init();

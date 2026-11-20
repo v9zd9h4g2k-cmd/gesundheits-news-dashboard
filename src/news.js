@@ -2,11 +2,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, ensureDataDir, getSettings, allSources } = require('./config');
+const { DATA_DIR, ensureDataDir, getSettings, allSources, selectedFor } = require('./config');
 const { fetchFeed, googleNewsUrl, stripGoogleSuffix } = require('./feeds');
 const { scoreArticle } = require('./relevance');
 const { clusterArticles, hash } = require('./cluster');
 const { getCached } = require('./summarize');
+const { TOPICS, getTopic } = require('./topics');
 
 const STORE_FILE = path.join(DATA_DIR, 'articles.json');
 const KEEP_DAYS = 8;
@@ -23,7 +24,12 @@ const state = {
 function loadStore() {
   try {
     const arr = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
-    for (const a of arr.articles || []) state.articles.set(a.id, a);
+    for (const a of arr.articles || []) {
+      // altes Format: healthFeed → topicFeeds
+      if (!a.topicFeeds) a.topicFeeds = a.healthFeed ? ['gesundheit'] : [];
+      delete a.healthFeed;
+      state.articles.set(a.id, a);
+    }
     state.sourceStatus = arr.sourceStatus || {};
     state.lastRefresh = arr.lastRefresh || null;
   } catch { /* erster Start */ }
@@ -63,7 +69,7 @@ function titleKey(sourceId, title) {
   return `${sourceId}|${title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')}`;
 }
 
-function addItems(source, items, { via, health }) {
+function addItems(source, items, { via, topic }) {
   const titleIndex = new Map();
   for (const a of state.articles.values()) titleIndex.set(titleKey(a.sourceId, a.title), a.id);
   let added = 0;
@@ -76,12 +82,13 @@ function addItems(source, items, { via, health }) {
     const tk = titleKey(source.id, title);
     if (state.articles.has(id)) {
       const ex = state.articles.get(id);
-      if (health && !ex.healthFeed) ex.healthFeed = true;
+      if (topic && !ex.topicFeeds.includes(topic)) ex.topicFeeds.push(topic);
       continue;
     }
     if (titleIndex.has(tk)) {
       // gleicher Artikel bereits über anderen Weg (z. B. direkter Feed statt Google News)
       const ex = state.articles.get(titleIndex.get(tk));
+      if (ex && topic && !ex.topicFeeds.includes(topic)) ex.topicFeeds.push(topic);
       if (ex && ex.via === 'google' && via === 'rss') {
         ex.link = link; ex.via = 'rss';
         if (it.description && it.description.length > (ex.description || '').length) ex.description = it.description;
@@ -101,7 +108,7 @@ function addItems(source, items, { via, health }) {
       sourceId: source.id,
       sourceName: source.name,
       via,
-      healthFeed: !!health,
+      topicFeeds: topic ? [topic] : [],
     });
     titleIndex.set(tk, id);
     added++;
@@ -122,21 +129,29 @@ async function pool(tasks, limit) {
   return results;
 }
 
-async function refreshSource(source, settings) {
+/** Für welche Themen ist die Quelle ausgewählt? */
+function topicsForSource(source, settings) {
+  return TOPICS.filter((t) => (source.topics || []).includes(t.id)
+    && (settings.selectedSources[t.id] || []).includes(source.id));
+}
+
+async function refreshSource(source, settings, topicsOverride) {
   const status = { ok: true, error: null, count: 0, lastFetch: new Date().toISOString(), feeds: [] };
-  const hasHistory = [...state.articles.values()].some((a) => a.sourceId === source.id);
-  const jobs = source.feeds.map((f) => ({ url: f.url, via: 'rss', health: !!f.health }));
+  const jobs = source.feeds.map((f) => ({ url: f.url, via: 'rss', topic: f.topic }));
   if (settings.googleNews && source.domain) {
-    jobs.push({ url: googleNewsUrl(source.domain, hasHistory ? 2 : 7), via: 'google', health: true });
+    for (const t of topicsOverride || topicsForSource(source, settings)) {
+      const hasHistory = [...state.articles.values()].some((x) => x.sourceId === source.id && x.topicFeeds.includes(t.id));
+      jobs.push({ url: googleNewsUrl(source.domain, hasHistory ? 2 : 7, t.googleTerms), via: 'google', topic: t.id });
+    }
   }
   for (const job of jobs) {
     try {
       const feed = await fetchFeed(job.url);
       const n = addItems(source, feed.items, job);
       status.count += feed.items.length;
-      status.feeds.push({ url: job.url, via: job.via, ok: true, items: feed.items.length, added: n });
+      status.feeds.push({ url: job.url, via: job.via, topic: job.topic, ok: true, items: feed.items.length, added: n });
     } catch (e) {
-      status.feeds.push({ url: job.url, via: job.via, ok: false, error: e.name === 'AbortError' ? 'Zeitüberschreitung' : e.message });
+      status.feeds.push({ url: job.url, via: job.via, topic: job.topic, ok: false, error: e.name === 'AbortError' ? 'Zeitüberschreitung' : e.message });
     }
   }
   if (!jobs.length) {
@@ -149,18 +164,21 @@ async function refreshSource(source, settings) {
   state.sourceStatus[source.id] = status;
 }
 
-async function refresh({ force = false } = {}) {
+async function refresh({ force = false, all = false } = {}) {
   if (state.demo) return { demo: true };
   if (state.refreshing) return state.refreshing;
   if (!force && state.lastRefresh && Date.now() - new Date(state.lastRefresh).getTime() < 5 * 60e3) {
     return { skipped: true };
   }
   const settings = getSettings();
-  const selected = new Set(settings.selectedSources);
-  const sources = allSources().filter((s) => selected.has(s.id));
+  const sources = all
+    ? allSources()
+    : allSources().filter((s) => topicsForSource(s, settings).length);
   state.refreshing = (async () => {
     const t0 = Date.now();
-    await pool(sources.map((s) => () => refreshSource(s, settings)), 6);
+    await pool(sources.map((s) => () => refreshSource(
+      s, settings, all ? TOPICS.filter((t) => (s.topics || []).includes(t.id)) : undefined,
+    )), 6);
     prune();
     state.lastRefresh = new Date().toISOString();
     state.version++;
@@ -172,36 +190,57 @@ async function refresh({ force = false } = {}) {
   try { return await state.refreshing; } finally { state.refreshing = null; }
 }
 
-let clusterCache = { key: null, value: null };
+const clusterCache = new Map(); // topic -> {key, value}
 
-function getNews({ hours = 24, gkvOnly = false, q = '' } = {}) {
-  const settings = getSettings();
-  const selected = new Set(settings.selectedSources);
+/** Alle für ein Thema relevanten Artikel im Zeitraum, bewertet. */
+function relevantArticles(topic, hours, selected) {
   const cutoff = Date.now() - hours * 3600e3;
-  const cacheKey = [state.version, hours, [...selected].sort().join(','), settings.clusterThreshold].join('|');
+  const out = [];
+  for (const a of state.articles.values()) {
+    if (selected && !selected.has(a.sourceId)) continue;
+    const t = new Date(a.date || a.fetchedAt).getTime();
+    if (t < cutoff || t > Date.now() + 3600e3) continue;
+    const r = scoreArticle(a, topic, { topicFeed: a.topicFeeds.includes(topic.id) });
+    if (!r.relevant) continue;
+    out.push({ ...a, ...r });
+  }
+  return out;
+}
+
+/** Ist der Artikel für irgendein Thema relevant? (für das Ausdünnen des Speichers) */
+function relevantForAnyTopic(a) {
+  return TOPICS.some((t) => scoreArticle(a, t, { topicFeed: (a.topicFeeds || []).includes(t.id) }).relevant);
+}
+
+/**
+ * @param {{topic?:string, hours?:number, focusOnly?:boolean, q?:string, allSources?:boolean}} opts
+ *        allSources: Quellenauswahl ignorieren (statischer Build – gefiltert wird im Browser)
+ */
+function getNews({ topic: topicId, hours = 24, focusOnly = false, q = '', allSources: all = false } = {}) {
+  const topic = getTopic(topicId);
+  const settings = getSettings();
+  const selected = all ? null : selectedFor(topic.id);
+  const cacheKey = [state.version, hours, selected ? [...selected].sort().join(',') : '*', settings.clusterThreshold].join('|');
 
   let clusters;
-  let relevant;
-  if (clusterCache.key === cacheKey) {
-    ({ clusters, relevant } = clusterCache.value);
+  const cached = clusterCache.get(topic.id);
+  if (cached && cached.key === cacheKey) {
+    clusters = cached.value;
   } else {
-    relevant = [];
-    for (const a of state.articles.values()) {
-      if (!selected.has(a.sourceId)) continue;
-      const t = new Date(a.date || a.fetchedAt).getTime();
-      if (t < cutoff || t > Date.now() + 3600e3) continue;
-      const r = scoreArticle(a, { healthFeed: a.healthFeed });
-      if (!r.health) continue;
-      relevant.push({ ...a, ...r });
-    }
-    clusters = clusterArticles(relevant, { threshold: settings.clusterThreshold });
-    clusterCache = { key: cacheKey, value: { clusters, relevant } };
+    clusters = clusterArticles(relevantArticles(topic, hours, selected), {
+      threshold: settings.clusterThreshold,
+      stopwords: topic.clusterStopwords,
+      synonyms: topic.clusterSynonyms,
+      splitCompounds: topic.splitCompounds,
+    });
+    for (const c of clusters) c.key = `${topic.id}:${c.key}`;
+    clusterCache.set(topic.id, { key: cacheKey, value: clusters });
   }
 
   // KI-Zusammenfassungen aus dem Cache anhängen
-  let list = clusters.map((c) => ({ ...c, ai: getCached(c) }));
+  let list = clusters.map((c) => ({ ...c, ai: getCached(c, topic) }));
 
-  if (gkvOnly) list = list.filter((c) => c.gkv);
+  if (focusOnly) list = list.filter((c) => c.focus);
   if (q) {
     const needle = q.toLowerCase();
     list = list.filter((c) => c.articles.some((a) => `${a.title} ${a.description}`.toLowerCase().includes(needle))
@@ -209,7 +248,7 @@ function getNews({ hours = 24, gkvOnly = false, q = '' } = {}) {
   }
 
   // Präsenz: verschiedene Medien zählen stärker als Mehrfachmeldungen eines Mediums
-  const presence = (c) => c.sourceCount * 3 + c.articleCount + (c.gkv ? 2 : 0);
+  const presence = (c) => c.sourceCount * 3 + c.articleCount + (c.focus ? 2 : 0);
   list.sort((a, b) => presence(b) - presence(a) || (b.lastSeen || '').localeCompare(a.lastSeen || ''));
 
   // Zeitverlauf (Meldungen je Zeitabschnitt) für die Präsenz-Kurve
@@ -231,9 +270,10 @@ function getNews({ hours = 24, gkvOnly = false, q = '' } = {}) {
   for (const c of list) for (const t of c.topics) topicCounts[t] = (topicCounts[t] || 0) + c.articleCount;
   const activeSources = new Set(list.flatMap((c) => c.sources.map((s) => s.id)));
   const articleCount = list.reduce((n, c) => n + c.articleCount, 0);
-  const gkvArticles = list.filter((c) => c.gkv).reduce((n, c) => n + c.articleCount, 0);
+  const focusArticles = list.filter((c) => c.focus).reduce((n, c) => n + c.articleCount, 0);
 
   return {
+    topic: topic.id,
     generatedAt: new Date().toISOString(),
     lastRefresh: state.lastRefresh,
     refreshing: !!state.refreshing,
@@ -244,17 +284,17 @@ function getNews({ hours = 24, gkvOnly = false, q = '' } = {}) {
       clusters: list.length,
       multiSource: list.filter((c) => c.sourceCount > 1).length,
       sources: activeSources.size,
-      selectedSources: selected.size,
-      gkvShare: articleCount ? gkvArticles / articleCount : 0,
-      gkvClusters: list.filter((c) => c.gkv).length,
+      selectedSources: selected ? selected.size : allSources().filter((s) => (s.topics || []).includes(topic.id)).length,
+      focusShare: articleCount ? focusArticles / articleCount : 0,
+      focusClusters: list.filter((c) => c.focus).length,
       topics: topicCounts,
     },
     clusters: list,
   };
 }
 
-function findCluster(id, hours) {
-  const res = getNews({ hours });
+function findCluster(id, hours, topic) {
+  const res = getNews({ hours, topic });
   return res.clusters.find((c) => c.id === id) || null;
 }
 
@@ -267,5 +307,5 @@ function enableDemo(articles) {
 }
 
 module.exports = {
-  state, loadStore, refresh, getNews, findCluster, enableDemo, addItems, canonicalLink,
+  state, loadStore, refresh, getNews, findCluster, enableDemo, addItems, canonicalLink, relevantForAnyTopic,
 };

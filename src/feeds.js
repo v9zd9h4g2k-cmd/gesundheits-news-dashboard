@@ -159,14 +159,9 @@ async function fetchFeed(url, opts) {
   return parseFeed(xml);
 }
 
-/** Suchbegriffe für die Google-News-Ergänzung (site:-Suche je Medium). */
-const GN_TERMS = [
-  'Krankenkasse', 'Krankenkassen', 'Krankenversicherung', 'GKV', 'Zusatzbeitrag',
-  'Gesundheit', 'Krankenhaus', 'Klinik', 'Pflege', 'Arzt', 'Apotheke', 'Medikamente',
-];
-
-function googleNewsUrl(domain, days) {
-  const q = `site:${domain} (${GN_TERMS.join(' OR ')}) when:${Math.max(1, days)}d`;
+/** Google-News-Suche: Artikel einer Domain zu den Suchbegriffen eines Themas. */
+function googleNewsUrl(domain, days, terms) {
+  const q = `site:${domain} (${terms.join(' OR ')}) when:${Math.max(1, days)}d`;
   return `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=de&gl=DE&ceid=DE:de`;
 }
 

@@ -44,14 +44,24 @@ const SUBWORDS = [
 ];
 
 /** Zerlegt Text in Stämme; merkt sich die häufigste Oberflächenform. */
-function tokenize(text, surface) {
-  const words = (text || '').toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}-]*[\p{L}\p{N}]|[\p{L}]{2,}/gu) || [];
+function tokenize(text, surface, opts = {}) {
+  const { stopwords, synonyms, splitCompounds } = opts;
+  let src = (text || '').toLowerCase();
+  for (const [re, repl] of synonyms || []) src = src.replace(re, repl);
+  const words = src.match(/[\p{L}\p{N}][\p{L}\p{N}-]*[\p{L}\p{N}]|[\p{L}]{2,}/gu) || [];
   const out = [];
   for (const raw of words) {
     const w = raw.replace(/^-+|-+$/g, '');
-    if (w.length < 3 || STOPWORDS.has(w) || /^\d+$/.test(w)) continue;
+    if (w.length < 3 || STOPWORDS.has(w) || (stopwords && stopwords.has(w)) || /^\d+$/.test(w)) continue;
     const s = stem(w);
     out.push(s);
+    // Bindestrich-Komposita zusätzlich in Teile zerlegen (KI-Coding-Agenten → coding, agenten)
+    if (splitCompounds && w.includes('-')) {
+      for (const part of w.split('-')) {
+        if (part.length < 4 || STOPWORDS.has(part) || (stopwords && stopwords.has(part)) || /^\d+$/.test(part)) continue;
+        out.push(stem(part));
+      }
+    }
     if (w.length >= 9) {
       for (const sw of SUBWORDS) {
         if (w.includes(sw) && !w.startsWith(sw + (w.length > sw.length + 3 ? '' : '#'))) out.push(`~${normalize(sw)}`);
@@ -98,11 +108,17 @@ function centroidOf(members) {
  * @param {Array} articles  – {id,title,description,sourceId,sourceName,date,...}
  * @param {{threshold?:number}} opts
  */
-function clusterArticles(articles, { threshold = 0.25 } = {}) {
+/**
+ * @param {Array} articles
+ * @param {{threshold?:number, stopwords?:string[], synonyms?:Array<[RegExp,string]>, splitCompounds?:boolean}} opts
+ *        stopwords/synonyms: themenspezifisch (z. B. „KI“ steht im KI-Bereich in fast jeder Meldung)
+ */
+function clusterArticles(articles, { threshold = 0.25, stopwords = [], synonyms = [], splitCompounds = false } = {}) {
   const surface = new Map();
+  const tokOpts = { stopwords: new Set(stopwords), synonyms, splitCompounds };
   const docs = articles.map((a) => {
-    const titleTokens = tokenize(a.title, surface);
-    const descTokens = tokenize(a.description, surface).slice(0, 80);
+    const titleTokens = tokenize(a.title, surface, tokOpts);
+    const descTokens = tokenize(a.description, surface, tokOpts).slice(0, 80);
     return { a, titleTokens, descTokens };
   });
 
@@ -169,7 +185,7 @@ function clusterArticles(articles, { threshold = 0.25 } = {}) {
     return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
   };
 
-  return clusters.map((c) => buildCluster(c, surfaceOf));
+  return clusters.map((c) => buildCluster(c, surfaceOf, tokOpts));
 }
 
 function sparseSimilarities(vecs) {
@@ -252,7 +268,7 @@ function jaccard(a, b) {
 }
 
 /** Extraktive Zusammenfassung: zentralste Sätze aus den Teasern. */
-function extractiveSummary(members, centroid, maxSentences = 3) {
+function extractiveSummary(members, centroid, maxSentences = 3, tokOpts = {}) {
   const candidates = [];
   const seen = new Set();
   for (const m of members) {
@@ -260,7 +276,7 @@ function extractiveSummary(members, centroid, maxSentences = 3) {
       const key = s.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      const toks = tokenize(s);
+      const toks = tokenize(s, null, tokOpts);
       if (toks.length < 4) continue;
       const vec = norm(new Map(toks.map((t) => [t, 1])));
       candidates.push({ s, toks, score: cosine(vec, centroid) });
@@ -282,7 +298,7 @@ function extractiveSummary(members, centroid, maxSentences = 3) {
   return out;
 }
 
-function buildCluster(c, surfaceOf) {
+function buildCluster(c, surfaceOf, tokOpts) {
   const members = c.members;
   // Repräsentant: am nächsten am Zentrum, Fachtitel bevorzugt vor Kurzmeldungen
   let rep = members[0];
@@ -303,12 +319,12 @@ function buildCluster(c, surfaceOf) {
     sourceCounts.set(a.sourceId, e);
   }
   const topicCounts = {};
-  let gkvArticles = 0;
-  let gkvScore = 0;
+  let focusArticles = 0;
+  let focusScore = 0;
   for (const a of articles) {
     for (const t of a.topics || []) topicCounts[t] = (topicCounts[t] || 0) + 1;
-    if (a.gkv) gkvArticles++;
-    gkvScore += a.gkvScore || 0;
+    if (a.focus) focusArticles++;
+    focusScore += a.focusScore || 0;
   }
   const topics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
   const keywords = [...c.centroid.entries()]
@@ -331,9 +347,9 @@ function buildCluster(c, surfaceOf) {
     lastSeen: dates[dates.length - 1] || null,
     topics,
     keywords,
-    gkv: gkvArticles > 0 && (gkvArticles / articles.length >= 0.34 || gkvScore >= 12),
-    gkvScore,
-    summary: extractiveSummary(members, c.centroid),
+    focus: focusArticles > 0 && (focusArticles / articles.length >= 0.34 || focusScore >= 12),
+    focusScore,
+    summary: extractiveSummary(members, c.centroid, 3, tokOpts),
     summarySource: 'extract',
   };
 }

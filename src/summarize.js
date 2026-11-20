@@ -31,14 +31,6 @@ function saveCache() {
   }, 500);
 }
 
-const SYSTEM_PROMPT = `Du bist Analyst:in für Gesundheitspolitik in Deutschland mit Schwerpunkt gesetzliche Krankenversicherung (GKV).
-Du erhältst mehrere Pressemeldungen deutscher Medien zum selben Thema (Titel, Medium, Datum, Teaser).
-Aufgabe:
-1. Formuliere eine prägnante, neutrale Überschrift (max. 90 Zeichen).
-2. Fasse den Kern der Meldungen sachlich in 2–4 Sätzen zusammen. Nenne konkrete Zahlen, Akteure und Termine, sofern in den Meldungen enthalten. Erfinde nichts; wenn Medien sich widersprechen, benenne das.
-3. Bewerte in 1–2 Sätzen die Relevanz für die GKV (Finanzen, Versicherte, Leistungen, Krankenkassen, Selbstverwaltung). Wenn kein erkennbarer GKV-Bezug besteht, schreibe "Kein direkter GKV-Bezug.".
-Antworte ausschließlich mit JSON: {"titel": "...", "zusammenfassung": "...", "gkv_relevanz": "..."}`;
-
 function clusterPrompt(cluster) {
   const lines = cluster.articles.slice(0, 12).map((a, i) => {
     const date = a.date ? new Date(a.date).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : 'unbekannt';
@@ -117,6 +109,7 @@ function parseJson(text) {
 }
 
 function cacheKey(cluster) {
+  // cluster.key enthält bereits die Themen-ID (z. B. "ki:abc123")
   const llm = resolveLlm();
   return `${llm.provider}:${llm.model}:${cluster.key}`;
 }
@@ -125,16 +118,16 @@ function getCached(cluster) {
   return loadCache()[cacheKey(cluster)] || null;
 }
 
-async function summarizeCluster(cluster) {
+async function summarizeCluster(cluster, topic) {
   const key = cacheKey(cluster);
   const c = loadCache();
   if (c[key]) return c[key];
-  const text = await callLlm({ system: SYSTEM_PROMPT, user: clusterPrompt(cluster) });
+  const text = await callLlm({ system: topic.prompts.summary, user: clusterPrompt(cluster) });
   const j = parseJson(text);
   const result = {
     title: String(j.titel || '').trim(),
     summary: String(j.zusammenfassung || '').trim(),
-    gkvRelevance: String(j.gkv_relevanz || '').trim(),
+    focusNote: String(j.fokus || j.gkv_relevanz || '').trim(),
     at: Date.now(),
   };
   c[key] = result;
@@ -142,28 +135,21 @@ async function summarizeCluster(cluster) {
   return result;
 }
 
-const BRIEFING_PROMPT = `Du bist Referent:in für Gesundheitspolitik mit Fokus GKV. Erstelle aus den folgenden Themengruppen
-(nach Präsenz in der Presse sortiert) ein kurzes Lagebild auf Deutsch:
-- 1 Einleitungssatz zur Gesamtlage,
-- danach 3–6 Stichpunkte mit den wichtigsten Entwicklungen (GKV-Themen zuerst),
-- zum Schluss "Im Blick behalten:" mit 1–2 Punkten.
-Nur Fakten aus den Meldungen verwenden, nichts erfinden. Antworte als JSON:
-{"einleitung": "...", "punkte": ["..."], "im_blick": ["..."]}`;
-
-async function briefing(clusters) {
+async function briefing(clusters, topic) {
   const top = clusters.slice(0, 15);
+  const tag = topic.prompts.briefingFocusTag;
   const user = top.map((c, i) => {
     const s = c.ai?.summary || c.summary;
-    return `${i + 1}. ${c.ai?.title || c.title} — ${c.articleCount} Meldungen/${c.sourceCount} Medien${c.gkv ? ' [GKV]' : ''}\n${s}`;
+    return `${i + 1}. ${c.ai?.title || c.title} — ${c.articleCount} Meldungen/${c.sourceCount} Medien${c.focus ? ` [${tag}]` : ''}\n${s}`;
   }).join('\n\n');
-  const key = `briefing:${resolveLlm().model}:${top.map((c) => c.key).join(',')}`;
+  const key = `briefing:${topic.id}:${resolveLlm().model}:${top.map((c) => c.key).join(',')}`;
   const cc = loadCache();
   if (cc[key]) return cc[key];
-  const j = parseJson(await callLlm({ system: BRIEFING_PROMPT, user, maxTokens: 900 }));
+  const j = parseJson(await callLlm({ system: topic.prompts.briefing, user, maxTokens: 900 }));
   const result = {
     intro: j.einleitung || '',
     points: Array.isArray(j.punkte) ? j.punkte : [],
-    watch: Array.isArray(j.im_blick) ? j.im_blick : [],
+    watch: Array.isArray(j.ausblick) ? j.ausblick : Array.isArray(j.im_blick) ? j.im_blick : [],
     at: Date.now(),
   };
   cc[key] = result;

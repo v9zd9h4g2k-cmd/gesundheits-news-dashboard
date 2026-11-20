@@ -10,6 +10,7 @@
  */
 
 const { SOURCES } = require('../src/sources');
+const { getTopic } = require('../src/topics');
 const { fetchFeed, googleNewsUrl } = require('../src/feeds');
 
 const withGoogle = process.argv.includes('--google');
@@ -18,7 +19,9 @@ const withGoogle = process.argv.includes('--google');
   const jobs = [];
   for (const s of SOURCES) {
     for (const f of s.feeds) jobs.push({ source: s.name, url: f.url, kind: 'RSS' });
-    if (withGoogle && s.domain) jobs.push({ source: s.name, url: googleNewsUrl(s.domain, 2), kind: 'GN ' });
+    if (withGoogle && s.domain) {
+      for (const t of s.topics || []) jobs.push({ source: `${s.name} (${t})`, url: googleNewsUrl(s.domain, 2, getTopic(t).googleTerms), kind: 'GN ' });
+    }
   }
   let ok = 0;
   let i = 0;

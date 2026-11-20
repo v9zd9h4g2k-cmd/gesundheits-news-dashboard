@@ -70,6 +70,46 @@ const RAW = [
   ['focus', 'FOCUS online', 34, 'Studie: Mehr Menschen mit Diabetes Typ 2', 'Die Zahl der Diabetes-Erkrankungen in Deutschland steigt weiter. Mediziner fordern mehr Prävention.'],
   ['kma', 'kma Online', 50, 'Uniklinik digitalisiert Notaufnahme', 'Eine Uniklinik setzt auf digitale Ersteinschätzung in der Notaufnahme und will so Wartezeiten verkürzen.'],
 
+  // ===== Themenbereich KI (ausgedacht) =====
+  // Thema: Copilot im Büroalltag
+  ['heise', 'heise online', 2, 'Microsoft 365 Copilot: So nutzen Unternehmen den KI-Assistenten im Arbeitsalltag', 'Drei Mittelständler berichten, wie Mitarbeitende mit Copilot Protokolle, E-Mails und Präsentationen schneller erstellen. Die Zeitersparnis liegt bei bis zu zwei Stunden pro Woche.', 'ki'],
+  ['t3n', 't3n', 4, 'Copilot im Büro: Fünf Anwendungsfälle, die wirklich Zeit sparen', 'Meeting-Zusammenfassungen, Entwürfe für E-Mails und Recherche: Diese Anwendungsfälle für den KI-Assistenten von Microsoft lohnen sich im Berufsalltag.', 'ki'],
+  ['computerwoche', 'COMPUTERWOCHE', 6, 'Studie: Beschäftigte sparen mit KI-Assistenten rund vier Stunden pro Woche', 'Eine Umfrage unter 1.000 Beschäftigten zeigt, dass KI-Assistenten wie Copilot und ChatGPT vor allem bei E-Mails und Dokumentation die Produktivität steigern.', null],
+  ['handelsblatt', 'Handelsblatt', 9, 'Wie Konzerne den KI-Assistenten Copilot einführen – und woran es hakt', 'Schulungen, Datenschutz und Lizenzkosten: Unternehmen berichten von ihren Erfahrungen mit Microsoft Copilot im Arbeitsalltag.', null],
+  ['spiegel', 'DER SPIEGEL', 14, 'KI-Assistenten im Büro: Was Copilot und Co. im Arbeitsalltag bringen', 'Viele Beschäftigte nutzen KI-Assistenten inzwischen täglich. Wo die Tools helfen und wo sie scheitern.', null],
+
+  // Thema: KI-Coding-Agenten in der Softwareentwicklung
+  ['heise-dev', 'heise developer', 3, 'KI-Coding-Agenten: Entwicklerteams berichten von 30 Prozent mehr Produktivität', 'Softwarehäuser setzen Claude Code, GitHub Copilot und Cursor in der Softwareentwicklung ein. Code-Reviews und Tests bleiben Pflicht.', null],
+  ['t3n', 't3n', 5, 'Agentic Coding: Wie KI-Agenten die Softwareentwicklung verändern', 'Statt einzelner Codezeilen übernehmen KI-Agenten ganze Aufgaben – von Refactoring bis Testautomatisierung. Was Entwicklerteams beachten sollten.', null],
+  ['golem', 'Golem.de', 7, 'Praxistest: Mit KI-Agenten Legacy-Code refaktorisieren', 'Wir haben drei KI-Coding-Tools an einer alten Java-Codebasis getestet. Refactoring und Unit-Tests gelingen schneller, Architekturfragen bleiben beim Menschen.', null],
+  ['entwickler', 'entwickler.de', 11, 'Vibe Coding im Team: Leitfaden für den produktiven Einsatz von KI in der Entwicklung', 'Wie Entwicklungsteams KI-Assistenten in Code-Review, Dokumentation und Testautomatisierung einbinden, ohne die Codequalität zu gefährden.', null],
+  ['handelsblatt', 'Handelsblatt', 16, 'Softwarefirmen setzen auf KI-Agenten – und stellen weniger Junior-Entwickler ein', 'IT-Dienstleister steigern mit KI-Coding-Tools ihre Effizienz. Das verändert den Arbeitsmarkt für Entwickler.', null],
+
+  // Thema: Neues Sprachmodell
+  ['decoder', 'THE DECODER', 3, 'OpenAI stellt neues Sprachmodell mit besserem Reasoning vor', 'Das neue Modell soll bei Programmieraufgaben und Analysen deutlich zulegen. Benchmarks zeigen Fortschritte gegenüber dem Vorgänger.', 'ki'],
+  ['heise', 'heise online', 4, 'Neues OpenAI-Sprachmodell: Mehr Reasoning, niedrigere Preise', 'OpenAI veröffentlicht ein neues LLM für ChatGPT und die API. Entwickler erhalten günstigeren Zugang.', 'ki'],
+  ['zeit', 'ZEIT ONLINE', 8, 'OpenAI veröffentlicht neues KI-Modell', 'Das Unternehmen hinter ChatGPT hat ein neues Sprachmodell vorgestellt, das komplexere Aufgaben lösen soll.', null],
+  ['faz', 'FAZ', 10, 'Neues Sprachmodell von OpenAI: Wettlauf mit Google und Anthropic verschärft sich', 'Mit dem neuen Modell reagiert OpenAI auf Gemini und Claude. Für Unternehmen sinken die Kosten pro Anfrage.', null],
+
+  // Thema: AI Act
+  ['netzpolitik', 'netzpolitik.org', 6, 'AI Act: Neue Pflichten für Unternehmen ab 2026', 'Ab August gelten weitere Vorgaben der KI-Verordnung. Unternehmen müssen KI-Kompetenz ihrer Mitarbeitenden nachweisen.', null],
+  ['tagesschau', 'tagesschau.de', 12, 'KI-Verordnung: Was Unternehmen jetzt beachten müssen', 'Die EU-Regulierung für Künstliche Intelligenz tritt schrittweise in Kraft. Die Bundesnetzagentur wird zur Aufsicht.', null],
+  ['bitkom', 'Bitkom', 20, 'Bitkom fordert praxistaugliche Umsetzung des AI Act', 'Der Digitalverband warnt vor Bürokratie bei der Umsetzung der KI-Verordnung im Mittelstand.', null],
+
+  // Thema: KI im Mittelstand
+  ['mittelstand-digital', 'Mittelstand-Digital', 15, 'KI im Mittelstand: Praxisbeispiele aus Handwerk und Produktion', 'Wie kleine Unternehmen mit KI Angebote schreiben, Dokumentation automatisieren und den Kundenservice entlasten.', null],
+  ['zukunftszentrum-ki', 'Zukunftszentrum KI NRW', 26, 'Weiterbildung: So bringen KMU ihren Beschäftigten den Umgang mit KI bei', 'Schulungen und Leitfaden für den Einsatz von KI am Arbeitsplatz – mit Anwendungsfällen aus der Praxis.', 'ki'],
+  ['wiwo', 'WirtschaftsWoche', 30, 'Mittelstand: Jedes dritte Unternehmen nutzt inzwischen KI', 'Laut einer Umfrage setzen immer mehr KMU KI-Tools ein – vor allem für Texte, Übersetzungen und Kundenservice.', null],
+
+  // Einzelmeldungen KI
+  ['golem', 'Golem.de', 18, 'Deepfake-Anrufe: BSI warnt vor KI-gestütztem Betrug', 'Kriminelle nutzen KI-generierte Stimmen, um Mitarbeitende zu Überweisungen zu bewegen.', null],
+  ['computerbase', 'ComputerBase', 22, 'Nvidia meldet Rekordumsatz dank KI-Chips', 'Die Nachfrage nach Rechenzentren für Künstliche Intelligenz treibt den Umsatz.', null],
+  ['decoder', 'THE DECODER', 40, 'Forscher zeigen neue Methode gegen Halluzinationen in Sprachmodellen', 'Eine Studie beschreibt, wie LLMs ihre Antworten selbst überprüfen können.', 'ki'],
+
+  // Rauschen ohne KI-Bezug (wird im KI-Bereich herausgefiltert)
+  ['heise', 'heise online', 5, 'Neues Smartphone: Hersteller stellt Mittelklasse-Modell vor', 'Das Gerät bietet einen größeren Akku und eine bessere Kamera.', null],
+  ['golem', 'Golem.de', 8, 'Mittelstand steigert Effizienz durch neue Lagerprozesse', 'Ein Logistiker berichtet von schnelleren Abläufen.', null],
+
   // Rauschen ohne Gesundheitsbezug (wird herausgefiltert)
   ['spiegel', 'DER SPIEGEL', 3, 'Bundesliga: Bayern gewinnt Spitzenspiel', 'Der FC Bayern setzte sich im Topspiel durch und übernimmt die Tabellenführung.'],
   ['welt', 'WELT', 5, 'Ifo-Index: Stimmung in der Wirtschaft trübt sich ein', 'Die Unternehmen in Deutschland blicken pessimistischer auf die kommenden Monate.'],
@@ -78,7 +118,7 @@ const RAW = [
 
 function demoArticles() {
   const now = Date.now();
-  return RAW.map(([sourceId, sourceName, hoursAgo, title, description], i) => {
+  return RAW.map(([sourceId, sourceName, hoursAgo, title, description, topicFeed], i) => {
     const link = `https://example.com/demo/${sourceId}/${i + 1}`;
     return {
       id: hash(link),
@@ -90,7 +130,8 @@ function demoArticles() {
       sourceId,
       sourceName,
       via: 'rss',
-      healthFeed: ['aerzteblatt', 'aerztezeitung', 'apothekeadhoc', 'pz', 'daz', 'kma', 'bmg', 'gba'].includes(sourceId),
+      topicFeeds: topicFeed ? [topicFeed]
+        : ['aerzteblatt', 'aerztezeitung', 'apothekeadhoc', 'pz', 'daz', 'kma', 'bmg', 'gba'].includes(sourceId) ? ['gesundheit'] : [],
     };
   });
 }
