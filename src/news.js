@@ -135,6 +135,14 @@ function topicsForSource(source, settings) {
     && (settings.selectedSources[t.id] || []).includes(source.id));
 }
 
+// Google News drosselt bei vielen gleichzeitigen Anfragen (HTTP 429) – Abfragen zeitlich verteilen.
+let googleGate = Promise.resolve();
+function throttleGoogle(ms = 400) {
+  const turn = googleGate.then(() => new Promise((r) => setTimeout(r, ms)));
+  googleGate = turn;
+  return turn;
+}
+
 async function refreshSource(source, settings, topicsOverride) {
   const status = { ok: true, error: null, count: 0, lastFetch: new Date().toISOString(), feeds: [] };
   const jobs = source.feeds.map((f) => ({ url: f.url, via: 'rss', topic: f.topic }));
@@ -146,6 +154,7 @@ async function refreshSource(source, settings, topicsOverride) {
   }
   for (const job of jobs) {
     try {
+      if (job.via === 'google') await throttleGoogle();
       const feed = await fetchFeed(job.url);
       const n = addItems(source, feed.items, job);
       status.count += feed.items.length;

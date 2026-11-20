@@ -82,6 +82,27 @@ function reportFeeds() {
   for (const line of failed) console.log(`  ✘ ${line}`);
 }
 
+/** Überblick im Protokoll: Top-Themen und Grenzfälle je Bereich (zur Feinabstimmung der Stichwörter). */
+function reportTopics() {
+  const { scoreArticle } = require('../src/relevance');
+  for (const topic of TOPICS) {
+    const data = news.getNews({ topic: topic.id, hours: 24, allSources: true });
+    console.log(`\n${topic.label} – Top-Themen (24 h):`);
+    for (const c of data.clusters.slice(0, 8)) {
+      console.log(`  ${String(c.sourceCount).padStart(2)} Medien ${c.focus ? `[${topic.focus.badge}]` : ''.padEnd(topic.focus.badge.length + 2)} ${c.title.slice(0, 100)}`);
+    }
+    // Grenzfälle: knapp relevante Meldungen aus allgemeinen Feeds
+    const border = data.clusters.flatMap((c) => c.articles)
+      .map((a) => ({ a, r: scoreArticle(a, topic, { topicFeed: false }) }))
+      .filter((x) => x.r.relevant)
+      .sort((x, y) => x.r.score - y.r.score)
+      .slice(0, 10);
+    console.log(`  Grenzfälle (niedrigste Punktzahl):`);
+    for (const { a, r } of border) console.log(`    ${String(r.score).padStart(3)}  ${a.sourceName}: ${a.title.slice(0, 90)}`);
+  }
+  console.log('');
+}
+
 async function main() {
   const t0 = Date.now();
   // Alle Quellen abrufen – die Auswahl trifft jede:r Nutzer:in im Browser.
@@ -100,6 +121,7 @@ async function main() {
     console.log(`  ${news.state.articles.size} Artikel aus dem Vorzustand`);
     await news.refresh({ force: true, all: true });
     reportFeeds();
+    reportTopics();
   }
 
   // KI-Zusammenfassungen (nur neue Themengruppen, Budget auf die Themen verteilt)

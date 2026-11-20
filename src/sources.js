@@ -56,7 +56,7 @@ const SOURCES = [
     id: 'zeit', name: 'ZEIT ONLINE', category: 'leitmedien', domain: 'zeit.de', topics: BOTH, defaults: BOTH,
     feeds: [
       { url: 'https://newsfeed.zeit.de/index' },
-      { url: 'https://newsfeed.zeit.de/wissen/gesundheit/index', topic: G },
+      { url: 'https://newsfeed.zeit.de/gesundheit/index', topic: G },
       { url: 'https://newsfeed.zeit.de/digital/index' },
     ],
   },
@@ -73,7 +73,7 @@ const SOURCES = [
     feeds: [
       { url: 'https://www.faz.net/rss/aktuell/' },
       { url: 'https://www.faz.net/rss/aktuell/wissen/medizin-ernaehrung/', topic: G },
-      { url: 'https://www.faz.net/rss/aktuell/wirtschaft/digitec/' },
+      { url: 'https://www.faz.net/rss/aktuell/technik-motor/digital/' },
     ],
   },
   {
@@ -97,7 +97,7 @@ const SOURCES = [
   },
   {
     id: 'focus', name: 'FOCUS online', category: 'leitmedien', domain: 'focus.de', topics: BOTH, defaults: [],
-    feeds: [{ url: 'https://rss.focus.de/fol/XML/rss_folnews.xml' }],
+    feeds: [{ url: 'https://www.focus.de/rss' }],
   },
   {
     id: 'stern', name: 'stern', category: 'leitmedien', domain: 'stern.de', topics: BOTH, defaults: [],
@@ -137,7 +137,7 @@ const SOURCES = [
   },
   {
     id: 'ndr', name: 'NDR', category: 'regional', domain: 'ndr.de', topics: BOTH, defaults: [],
-    feeds: [{ url: 'https://www.ndr.de/nachrichten/index-rss.xml' }],
+    feeds: [], // RSS-Adresse geändert – Abruf über Google News
   },
   { id: 'mdr', name: 'MDR', category: 'regional', domain: 'mdr.de', topics: BOTH, defaults: [], feeds: [] },
   { id: 'br', name: 'BR24', category: 'regional', domain: 'br.de', topics: BOTH, defaults: [], feeds: [] },
