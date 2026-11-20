@@ -62,7 +62,7 @@ function clusterTopic(topic) {
     .map((a) => ({ ...a, ...scoreArticle(a, topic, { topicFeed: a.topicFeeds.includes(topic.id) }) }))
     .filter((a) => a.relevant);
   return clusterArticles(arts, {
-    threshold: 0.25, stopwords: topic.clusterStopwords, synonyms: topic.clusterSynonyms, splitCompounds: topic.splitCompounds,
+    threshold: 0.25, stopwords: topic.clusterStopwords, synonyms: topic.clusterSynonyms, splitCompounds: topic.splitCompounds, focusMin: Math.max(6, topic.focus.minScore),
   });
 }
 
@@ -126,4 +126,14 @@ test('Quellen: gültige Themen, Kategorien und eindeutige IDs', () => {
     for (const f of s.feeds) assert.ok(!f.topic || topicIds.has(f.topic));
     for (const t of s.topics) assert.ok(getTopic(t).categories.includes(s.category), `${s.id}: Kategorie fehlt im Thema ${t}`);
   }
+});
+
+test('Fokus: Hersteller-Erwähnung und Blaulicht-Meldungen führen nicht zu Fehltreffern', () => {
+  const ipo = scoreArticle({ title: 'Anthropic mit Rekord-Börsengang', description: 'Der Claude-Entwickler Anthropic sammelt Milliarden ein. Der ChatGPT-Entwickler OpenAI könnte folgen.' }, K);
+  assert.ok(ipo.relevant);
+  assert.equal(ipo.focus, false);
+  const raser = scoreArticle({ title: 'Verkehrsunfall: Flucht vor der Polizei endet für Raser im Krankenhaus', description: '' }, G);
+  assert.equal(raser.relevant, false);
+  const musk = scoreArticle({ title: 'Musk distanziert sich von „Maga“', description: 'Der Chef von xAI äußert sich.' }, K);
+  assert.equal(musk.relevant, false);
 });

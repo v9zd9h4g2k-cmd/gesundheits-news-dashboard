@@ -113,7 +113,7 @@ function centroidOf(members) {
  * @param {{threshold?:number, stopwords?:string[], synonyms?:Array<[RegExp,string]>, splitCompounds?:boolean}} opts
  *        stopwords/synonyms: themenspezifisch (z. B. „KI“ steht im KI-Bereich in fast jeder Meldung)
  */
-function clusterArticles(articles, { threshold = 0.25, stopwords = [], synonyms = [], splitCompounds = false } = {}) {
+function clusterArticles(articles, { threshold = 0.25, stopwords = [], synonyms = [], splitCompounds = false, focusMin = 6 } = {}) {
   const surface = new Map();
   const tokOpts = { stopwords: new Set(stopwords), synonyms, splitCompounds };
   const docs = articles.map((a) => {
@@ -185,7 +185,7 @@ function clusterArticles(articles, { threshold = 0.25, stopwords = [], synonyms 
     return [...m.entries()].sort((a, b) => b[1] - a[1])[0][0];
   };
 
-  return clusters.map((c) => buildCluster(c, surfaceOf, tokOpts));
+  return clusters.map((c) => buildCluster(c, surfaceOf, tokOpts, focusMin));
 }
 
 function sparseSimilarities(vecs) {
@@ -298,7 +298,7 @@ function extractiveSummary(members, centroid, maxSentences = 3, tokOpts = {}) {
   return out;
 }
 
-function buildCluster(c, surfaceOf, tokOpts) {
+function buildCluster(c, surfaceOf, tokOpts, focusMin) {
   const members = c.members;
   // Repräsentant: am nächsten am Zentrum, Fachtitel bevorzugt vor Kurzmeldungen
   let rep = members[0];
@@ -347,7 +347,8 @@ function buildCluster(c, surfaceOf, tokOpts) {
     lastSeen: dates[dates.length - 1] || null,
     topics,
     keywords,
-    focus: focusArticles > 0 && (focusArticles / articles.length >= 0.34 || focusScore >= 12),
+    // Fokus, wenn ein Drittel der Meldungen den Fokus betrifft oder der Fokus-Anteil im Schnitt hoch ist
+    focus: focusArticles > 0 && (focusArticles / articles.length >= 0.34 || focusScore / articles.length >= focusMin),
     focusScore,
     summary: extractiveSummary(members, c.centroid, 3, tokOpts),
     summarySource: 'extract',

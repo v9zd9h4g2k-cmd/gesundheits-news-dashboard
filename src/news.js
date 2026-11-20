@@ -241,6 +241,7 @@ function getNews({ topic: topicId, hours = 24, focusOnly = false, q = '', allSou
       stopwords: topic.clusterStopwords,
       synonyms: topic.clusterSynonyms,
       splitCompounds: topic.splitCompounds,
+      focusMin: Math.max(6, topic.focus.minScore),
     });
     for (const c of clusters) c.key = `${topic.id}:${c.key}`;
     clusterCache.set(topic.id, { key: cacheKey, value: clusters });

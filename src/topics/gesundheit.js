@@ -182,6 +182,8 @@ const RULES = [
 const NEGATIVE = [
   /(?<![\p{L}])(denkmalpflege|landschaftspflege|beziehungspflege|körperpflege|rasenpflege|autopflege|brauchtumspflege)/giu,
   /(?<![\p{L}])(bundesliga|champions league|transfermarkt)/giu,
+  // Blaulicht-Meldungen, die nur zufällig „Krankenhaus“/„Klinik“ erwähnen
+  /(?<![\p{L}])(polizei|verkehrsunfall|unfall|raser|feuerwehr|brand|festgenommen|messerangriff|schüsse)(?![\p{L}])/giu,
 ];
 
 const SUMMARY_PROMPT = `Du bist Analyst:in für Gesundheitspolitik in Deutschland mit Schwerpunkt gesetzliche Krankenversicherung (GKV).
